@@ -2,16 +2,17 @@
 # -----------------------------------------------------------------------------
 # Project definition
 # -----------------------------------------------------------------------------
-PROJECT(DGtalTools-contrib)
 
 cmake_minimum_required (VERSION 3.11) 
+
+PROJECT(DGtalTools-contrib)
+
 cmake_policy(SET CMP0057 NEW)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 include(polyscope)
-
 
 
 # -----------------------------------------------------------------------------
@@ -21,7 +22,7 @@ include(polyscope)
  set (CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
 
-FIND_PACKAGE(DGtal 1.5 REQUIRED)
+FIND_PACKAGE(DGtal 1.4 REQUIRED)
 INCLUDE_DIRECTORIES(${DGTAL_INCLUDE_DIRS})
 LINK_DIRECTORIES(${DGTAL_LIBRARY_DIRS})
 
@@ -46,11 +47,9 @@ if(WITH_OPENCV)
 endif()
 
 
-
 # CLI11
 include_directories( "${PROJECT_SOURCE_DIR}/ext/" )
 include_directories(${PROJECT_SOURCE_DIR})
-
 
 
 # -----------------------------------------------------------------------------
@@ -65,16 +64,7 @@ SET(PROJECT_VERSION "${DGtalToolsContrib_VERSION_MAJOR}.${DGtalToolsContrib_VERS
 SET(VERSION ${DGtalToolsContrib_VERSION_MAJOR}.${DGtalToolsContrib_VERSION_MINOR}.${DGtalToolsContrib_VERSION_PATCH})
 
 
-
-
-
-
-
-
-
 #------Tools subdirectories ------
 add_subdirectory(geometry2d)
 add_subdirectory(geometry3d)
 add_subdirectory(visualisation)
-
-
