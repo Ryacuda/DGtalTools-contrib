@@ -147,7 +147,7 @@ struct PithSectionCenter
 
         if (n != mySampledPith.size())
         {
-            trace.warning() << "all samples are not represented: " << n << "over " << myNbIntervals << std::endl;
+            DGtal::trace.warning() << "all samples are not represented: " << n << "over " << myNbIntervals << std::endl;
         }
     }
 
@@ -182,7 +182,7 @@ struct TrunkAngularSamplor
             double dz = pSectCenter.myPith[0][2] - pSectCenter.myPith[1][2];
             double l = sqrt(dz*dz+myDistanceScan*myDistanceScan);
             myAngularVSize = abs(asin(dz/l));
-            trace.info() << "estimated vertical scan angle size: " << myAngularVSize << std::endl;
+            DGtal::trace.info() << "estimated vertical scan angle size: " << myAngularVSize << std::endl;
         }
     }
     
@@ -203,40 +203,87 @@ struct TrunkAngularSamplor
 
 struct TrunkDeformator
 {
+    // Members
     double mySectorSize;
     double myMinZ, myMaxZ;
+    double myMaxShift;
     int myNbSectors;
     std::vector<double> mySectorShift;
     const PithSectionCenter& mySectionCenter;
+
+    // Enum
+    enum DeformType
+    {
+        PITH_DEFORM, 
+        LINEAR_SHIFT, 
+        LONGI_ONDUL_SHIFT, 
+        RADIAL_ONDUL_SHIFT, 
+        LONGIRADIAL_ONDUL_SHIFT
+    };
     
     // Constructor
-
     TrunkDeformator(const PithSectionCenter &pSectCenter, double maxShift, double sectSize)
-    : mySectionCenter(pSectCenter), mySectorSize(sectSize)
+        : mySectionCenter(pSectCenter), mySectorSize(sectSize), myMaxShift(maxShift)
     {
         myNbSectors = (int)floor((2.0*M_PI) / mySectorSize);
         std::srand((unsigned int) std::time(NULL));
-        
+
         for (unsigned int i = 0; i < myNbSectors; i++)
         {
-            double shift = rand()%((int)floor(2000.0*maxShift));
+            double shift = rand()%((int)floor(2000.0*myMaxShift));
             shift /= 2000.0;
             mySectorShift.push_back(shift);
         }
     }
 
     // Methods
-
-    Z3i::RealPoint deform(const Z3i::RealPoint &pt, const Z3i::RealPoint &ptCyl) const
+    Z3i::RealPoint deform(const Z3i::RealPoint &pt, Z3i::RealPoint ptCyl,
+                          DeformType defType = DeformType::LINEAR_SHIFT,
+                          double freqL = 1.0, double freqR = 1.0) const 
     {
         Z3i::RealPoint res = pt;
-        unsigned int sectInd = (unsigned int) floor(ptCyl[1]/mySectorSize);
+        double ratioZ = (pt[2]-mySectionCenter.myMinZ)/(mySectionCenter.myMaxZ-mySectionCenter.myMinZ);
+
+        if (defType == RADIAL_ONDUL_SHIFT || defType == LONGIRADIAL_ONDUL_SHIFT) 
+        {
+            ptCyl[1] = ptCyl[1] + sin(ratioZ*freqR);
+        }
+
+        unsigned int sectInd = (unsigned int) floor(ptCyl[1]/mySectorSize)%myNbSectors;
         double posA = (((double) sectInd)*mySectorSize+mySectorSize/2.0)-ptCyl[1];
         double gCoef = gaussF(posA, 0, mySectorSize/4.0 );
-        double ratioZ = (pt[2]-mySectionCenter.myMinZ)/(mySectionCenter.myMaxZ-mySectionCenter.myMinZ);
-        double hShift = mySectorShift[sectInd]*ratioZ*gCoef*0.5;
-        res = res  + (pt-mySectionCenter.pithRepresentant(pt)).getNormalized()*hShift;
+        double hShift = 0.0;
 
+        switch (defType)
+        {
+            case DeformType::LINEAR_SHIFT:
+                hShift = mySectorShift[sectInd]*ratioZ*gCoef*0.5;
+                break;
+            case DeformType::LONGI_ONDUL_SHIFT :
+                hShift = cos(2.0*M_PI*freqL*ratioZ)*gCoef*myMaxShift;
+                break;
+            case DeformType::RADIAL_ONDUL_SHIFT:
+                hShift = mySectorShift[sectInd]*ratioZ*gCoef*0.5;
+                break;
+            case DeformType::LONGIRADIAL_ONDUL_SHIFT:
+                hShift = cos(2.0*M_PI*freqL*ratioZ)*gCoef*myMaxShift*ratioZ;
+                break;
+            default:
+                break;
+        }
+
+        // double hShift = mySectorShift[sectInd]*ratioZ*gCoef*0.5;
+
+        res = res  + (pt-mySectionCenter.pithRepresentant(pt)).getNormalized()*hShift;
+        return res;
+    }
+    
+    Z3i::RealPoint moveFromCenterLine(const Z3i::RealPoint &pt, Z3i::RealPoint ptCyl,
+                                      double fX, double fY, double fZ) const 
+    {
+        Z3i::RealPoint res = pt;
+        double ratioZ = (pt[2]-mySectionCenter.myMinZ)/(mySectionCenter.myMaxZ-mySectionCenter.myMinZ);
+        res = res  + Z3i::RealPoint(cos(ratioZ*fX),cos(ratioZ*fY), cos(ratioZ*fZ))*myMaxShift;
         return res;
     }
 };
@@ -244,7 +291,6 @@ struct TrunkDeformator
 
 int main( int argc, char** argv )
 {
-    // CLI variables
     double parameter {1.0};
     std::string inputMeshFileName;
     std::string inputCLineFileName;
@@ -265,14 +311,19 @@ int main( int argc, char** argv )
     double vSampleDist {5000.0};
     double vSampleAngularResol = 0.001;
     double vSampleAngularSensi = 0.1;
-    
+    double lOndFreq = 1.0;
+    double rOndFreq = 1.0;
+
     usage << "Usage: " << argv[0] << " [input]\n"
     << "Typical use example:\n \t trunkMeshTransform ../Samples/TrunkSample/chene1.off -c ../Samples/TrunkSample/chene1-cyl  "
     <<"-p ../Samples/TrunkSample/chene1_centerline.xyz  resTransform.off -s 200 1  --outputPoints resTransform.pts  "
     << "-F 0.8 -P 5.0 --mainDir 0 -1 0 \n";
+
     // parse command line using CLI-------------------------------------------------------
     CLI::App app;
+
     app.description("Transform an input mesh into points cloud simulating acquisition process like lidar Scan .\n" + usage.str() );
+
     app.add_option("--inputMesh,-i,1", inputMeshFileName, "Input file")
     ->required()->check(CLI::ExistingFile);
     app.add_option("--InputCCoords,-c,2", inputCLineFileName, "Input file containing cylinder coordinates")
@@ -286,19 +337,21 @@ int main( int argc, char** argv )
     ->expected(1);
     auto mainDirOpt = app.add_option("--mainDir,-m", mainDirV, "Define the main direction to define the filtering angle based (see --filterFacePosition and --filterFaceNormal ")
     ->expected(3);
+
     auto vertSampleOpt = app.add_flag("--verticalSampling", "Apply a vertical sampling simulation by considering the laser scan.");
     app.add_option("--scannerDistance", vSampleDist, "Define the laser scan position distance. (effect only with --verticalSampling) .", true);
-    
     auto vROpt = app.add_option("--vSampleAngularResol", vSampleAngularResol, "Define the vertical angular resolution of the laser scanner. (effect only with --verticalSampling) ");
     auto vSOpt = app.add_option("--vSampleAngularSensi", vSampleAngularSensi, "Defines the vertical angular sensibility laser scan intersection detection. (effect only with --verticalSampling) ");
+    
     auto outMesh = app.add_option("--outputMesh,-o,3", outputMesh, "Output mesh file name.");
     auto outPts = app.add_option("--outputPoints", outputPts, "Output pts file name");
+    
+    auto lOndOpt = app.add_option("--LongOndulation,-L", lOndFreq, "deforms the trunk by using a vertical ondulation along the bark instead  the shift sector (the ondulation frequence given as arguments is defined with respect to the trunk length). ");
+    auto rOndOpt = app.add_option("--RadOndulation,-R", rOndFreq, "deforms the trunk by using a radial ondulation along the bark instead  the shift sector (the ondulation frequence given as arguments is defined with respect to the trunk length). ");
+
+    
     app.get_formatter()->column_width(40);
     CLI11_PARSE(app, argc, argv);
-
-    // add wood parameters ? pre packaged properties ? deformation force ?
-    // also revamping this code a bit maybe
-
     // END parse command line using CLI ----------------------------------------------
     
     Mesh3D resultingMesh;
@@ -326,20 +379,31 @@ int main( int argc, char** argv )
     cylCoordinates = PointListReader<DGtal::Z3i::RealPoint>::getPointsFromFile(inputCLineFileName);
     trace.info() << " [done] (#vertices: " << cylCoordinates.size() << ")" << std::endl;
     
+    
     double baseRad = cylCoordinates[0][0];
     mainDir[0] = mainDirV[0];
     mainDir[1] = mainDirV[1];
     mainDir[2] = mainDirV[2];
+    TrunkDeformator::DeformType defType = (lOndOpt->count() > 0) ? TrunkDeformator::DeformType::LONGI_ONDUL_SHIFT :
+                                          (rOndOpt -> count() > 0) ? TrunkDeformator::DeformType::RADIAL_ONDUL_SHIFT:
+                                            TrunkDeformator::DeformType::LINEAR_SHIFT;
     
+    if (rOndOpt -> count() > 0 && lOndOpt->count()>0)
+    {
+        defType = TrunkDeformator::DeformType::LONGIRADIAL_ONDUL_SHIFT;
+    }
+
     // prepare resulting mesh
     for (auto it = aMesh.vertexBegin(); it != aMesh.vertexEnd(); it++)
     {
         resultingMesh.addVertex(*it);
     }
 
+    defType = TrunkDeformator::DeformType::PITH_DEFORM;
+
     // First sector extraction
     mainDir = mainDir.getNormalized();
-
+   
     //a) applying shift on sector
     if (shiftFacePos->count()>0)
     {
@@ -351,7 +415,31 @@ int main( int argc, char** argv )
         {
             Z3i::RealPoint &pt = resultingMesh.getVertex(i);
             Z3i::RealPoint ptCyl = cylCoordinates[i];
-            Z3i::RealPoint newP = tDef.deform(pt, ptCyl);
+            Z3i::RealPoint newP;
+
+            switch (defType)
+            {
+                case TrunkDeformator::DeformType::LINEAR_SHIFT:
+                    newP = tDef.deform(pt, ptCyl);
+                    break;
+                case TrunkDeformator::DeformType::LONGI_ONDUL_SHIFT:
+                    newP = tDef.deform(pt, ptCyl, TrunkDeformator::DeformType::LONGI_ONDUL_SHIFT,
+                                       lOndFreq, rOndFreq);
+                    break;
+                case TrunkDeformator::DeformType::RADIAL_ONDUL_SHIFT:
+                    newP = tDef.deform(pt, ptCyl, TrunkDeformator::DeformType::RADIAL_ONDUL_SHIFT,
+                                       lOndFreq, rOndFreq);
+                    break;
+                case TrunkDeformator::DeformType::LONGIRADIAL_ONDUL_SHIFT:
+                    newP = tDef.deform(pt, ptCyl, TrunkDeformator::DeformType::LONGIRADIAL_ONDUL_SHIFT,
+                                       lOndFreq, rOndFreq);
+                    break;
+                case TrunkDeformator::DeformType::PITH_DEFORM:
+                    newP = tDef.moveFromCenterLine(pt, ptCyl, 5, 10, 3);
+                default:
+                    break;
+            }
+
             pt[0] = newP[0]; pt[1] = newP[1]; pt[2] = newP[2];
         }
     }
@@ -361,7 +449,6 @@ int main( int argc, char** argv )
     {
         tSamplor.myAngularVSize = vSampleAngularResol;
     }
-
     if (vSOpt -> count()>0)
     {
         tSamplor.myAngularToleranceFactor = vSampleAngularSensi;
@@ -381,13 +468,12 @@ int main( int argc, char** argv )
 
         if (filterFaceNormal -> count() > 0 && okSampling )
         {
-               Z3i::RealPoint vectNormal = ((p1-p0).crossProduct(p2 - p0)).getNormalized();
+            Z3i::RealPoint vectNormal = ((p1-p0).crossProduct(p2 - p0)).getNormalized();
             vectNormal /= vectNormal.norm();
             okOrientation = vectNormal.dot(mainDir) > cos(normalAngleRange/2.0);
         }
 
         bool sectorCompatible = true;
-
         if (filterFacePosition -> count() > 0 && okSampling)
         {
             auto pB = (p0+p1+p2)/3.0;
@@ -413,13 +499,14 @@ int main( int argc, char** argv )
         resultingMesh >> outputMesh;
         trace.info() << "[done]." << std::endl;
     }
+
     if (outPts->count() > 0 )
     {
         trace.info() << "Writing output points...";
         
         ofstream fout;
         fout.open(outputPts);
-
+        
         for (auto it = resultingMesh.vertexBegin(); it != resultingMesh.vertexEnd(); it++)
         {
             fout << (*it)[0] << " " << (*it)[1] << " " << (*it)[2] << std::endl;
@@ -428,6 +515,6 @@ int main( int argc, char** argv )
         fout.close();
         trace.info() << "[done]." << std::endl;
     }
-    
+
     return 0;
 }
