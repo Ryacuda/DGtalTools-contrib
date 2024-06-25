@@ -36,23 +36,20 @@
 #include <DGtal/helpers/ShortcutsGeometry.h>
 #include "DGtal/io/readers/MeshReader.h"
 #include "DGtal/io/writers/MeshWriter.h"
+#include <DGtal/geometry/tools/RayIntersectionPredicates.h>
 
 #include <algorithm>
+#include <cmath>
 
 #include "CLI11.hpp"
-
-///////////////////////////////////////////////////////////////////////////////
-using namespace DGtal;
-///////////////////////////////////////////////////////////////////////////////
-
 
 /**
 
 
 **/
 
-typedef PointVector<3,double>               RealPoint;
-typedef PolygonalSurface< RealPoint >       PolyMesh;
+typedef DGtal::PointVector<3,double>               RealPoint;
+typedef DGtal::PolygonalSurface< RealPoint >       PolyMesh;
 typedef PolyMesh::VertexRange               VertexRange;
 
 const RealPoint::Component GLOBAL_epsilon = std::numeric_limits<RealPoint::Component>::epsilon();
@@ -73,7 +70,7 @@ struct Ray
     {}
 
     // Methods
-    double intersectTriangle(const RealPoint& a, const RealPoint& b, const RealPoint& c)
+    double intersectTriangle(const RealPoint& a, const RealPoint& b, const RealPoint& c) const
     {   // Möller–Trumbore algorithm found here : https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
         RealPoint v1 = b - a;
         RealPoint v2 = c - a;
@@ -111,8 +108,97 @@ struct Ray
 
         return -1.0;
     }
+
+
+    double intersectSurface(PolyMesh& aPolysurf) const
+    {
+        PolyMesh::PositionsMap pos = aPolysurf.positions();
+
+        std::cout << "Number of faces: " << aPolysurf.nbFaces() << std::endl;
+
+        double t_min = std::numeric_limits<double>::infinity();
+        for(size_t i = 0; i < aPolysurf.nbFaces(); i++)
+        {
+            VertexRange vertices = aPolysurf.verticesAroundFace(i);
+
+            // check if the number of vertices is acceptable
+            if(vertices.size() < 3)
+            {   // ignore this face, we need 3 vertices or more
+                continue;
+            }
+
+            // check for intersetion
+            double t = intersectTriangle(pos[vertices[0]], pos[vertices[1]], pos[vertices[2]]);
+
+            if(t > 0 && t < t_min)
+            {   // intersection exists, replace any previously found intersection if closer to origin
+                t_min = t;
+            }
+        }
+
+        // return dist value
+        return t_min;
+    }
 };
 
+
+class SampledCenterline
+{
+private:
+    // Members
+    std::vector<RealPoint> mySampledPoints;
+    double myMinZ, myMaxZ;
+    double mySampleSize = 20.0;
+    int myNbIntervals;
+
+public:
+    // Constructors
+    SampledCenterline(const std::vector<RealPoint> &aPith, int nbIntervals)
+        : myNbIntervals(nbIntervals), mySampledPoints(nbIntervals)
+    {
+        if(nbIntervals > aPith.size())
+        {
+            DGtal::trace.warning() << "More samples (" << nbIntervals << ") than actual data." << std::endl;
+        }
+
+        myMaxZ = (*std::max_element(aPith.begin(), aPith.end(),
+                                    [](RealPoint a, RealPoint b){return a[2] < b[2];}))[2];
+        myMinZ = (*std::min_element(aPith.begin(), aPith.end(),
+                                    [](RealPoint a, RealPoint b){return a[2] < b[2];}))[2];
+        
+        mySampleSize = (myMaxZ - myMinZ) / myNbIntervals;
+
+        for (auto const &p: aPith)
+        {
+            int i = (int) floor((p[2]-myMinZ)/mySampleSize);
+            mySampledPoints[i] = p;
+        }
+
+        //check if all sample are presents
+        unsigned int n = 0;
+        for (unsigned int i = 0; i < myNbIntervals; i++)
+        {
+            if (mySampledPoints[i] != RealPoint(0,0,0)){
+                n++;
+            }
+        }
+
+        if (n != mySampledPoints.size())
+        {
+            DGtal::trace.warning() << "all samples are not represented: " << n << "over " << myNbIntervals << std::endl;
+        }
+    }
+
+    // Methods
+
+    RealPoint pithRepresentant(const RealPoint &p) const 
+    {
+        unsigned int i = (unsigned int) ceil((p[2]-myMinZ)/mySampleSize);
+        assert(i >= 0);
+        i = std::min((unsigned int)(mySampledPoints.size()-1), i);
+        return mySampledPoints[i];
+    }
+};
 
 PolyMesh makeBasicPolyMesh()
 {   // taken from https://www.dgtal.org/doc/stable/moduleHalfEdgeMesh.html#HEM_sec3_1
@@ -132,71 +218,36 @@ PolyMesh makeBasicPolyMesh()
     return mesh;
 }
 
-RealPoint intersectSurface()
+
+void unrollTrunk(PolyMesh& aPolysurf)
 {
-    // raycast parameter
-    RealPoint origin(0.5,0.5,0);
-    RealPoint direction(1,0,0);
-    Ray ray(origin, direction);
 
-    // numerical constant
-    
-
-    PolyMesh mesh = makeBasicPolyMesh();
-    PolyMesh::PositionsMap pos = mesh.positions();
-
-    std::cout << "Number of faces: " << mesh.nbFaces() << std::endl;
-
-    double t_min = std::numeric_limits<double>::infinity();
-    size_t face_id = mesh.nbFaces();
-    for(size_t i = 0; i < mesh.nbFaces(); i++)
-    {
-        VertexRange vertices = mesh.verticesAroundFace(i);
-
-        // check if the number of vertices is acceptable
-        if(vertices.size() < 3)
-        {   // ignore this face, we need 3 vertices or more
-            continue;
-        }
-
-        // check for intersetion
-        double t = ray.intersectTriangle(pos[vertices[0]], pos[vertices[1]], pos[vertices[2]]);
-
-        if(t > 0 && t < t_min)
-        {   // intersection exists, replace any previously found intersection if closer to origin
-            t_min = t;
-            face_id = i;
-        }
-    }
-
-    if(t_min < std::numeric_limits<double>::infinity())
-    {   // if an intersection has been found, return it
-        std::cout << face_id << std::endl;
-        return ray.myOrigin + ray.myDirection * t_min;
-    }
-    
-    // else return ray origin
-    return origin;
 }
 
 
 int main(int argc, char** argv)
 {
-    std::string inputFilename;
+    std::string meshFilename;
+    std::string centerlineFilename;
     std::string outputFilename = "map.png";
 
     DGtal::Mesh<DGtal::Z3i::RealPoint> inputMesh;
     PolyMesh inputPolySurf;
 
     // parse command line using CLI ----------------------------------------------
-    
-    // inputs and output
     CLI::App app;
     app.description("trunkMeshMap tool to create a map representation of the surface of a tree trunk (mesh).\n");
-    app.add_option("-i,--input,1", inputFilename, "an input mesh file in .obj or .off format." )
+    
+    // inputs
+    app.add_option("--inputmesh,1", meshFilename, "an input mesh file in .obj or .off format." )
     ->required()
     ->check(CLI::ExistingFile);
-    app.add_option("-o,--output,2", outputFilename, "an output image file.", true );
+    app.add_option("--inputcenterline,2", centerlineFilename, "an input mesh file in .obj or .off format." )
+    ->required()
+    ->check(CLI::ExistingFile);
+    
+    // outputs
+    app.add_option("-o,--output,3", outputFilename, "an output image file.", true );
 
     app.get_formatter()->column_width(40);
     CLI11_PARSE(app, argc, argv);
@@ -204,21 +255,28 @@ int main(int argc, char** argv)
     // END parse command line using CLI ----------------------------------------------
 
     /* // read input mesh and transform into PolyMesh
-    trace.info() << "Reading input mesh...";
+    DGtal::trace.info() << "Reading input mesh...";
     inputMesh << inputFilename;
-    trace.info() << " [done] (#vertices: " << inputMesh.nbVertex() << ")" << std::endl;
+    DGtal::trace.info() << " [done] (#vertices: " << inputMesh.nbVertex() << ")" << std::endl;
     
     inputMesh.removeIsolatedVertices();
 
-    trace.info() << "Mesh into PolyMesh...";
+    DGtal::trace.info() << "Mesh into PolyMesh...";
     if( DGtal::MeshHelpers::mesh2PolygonalSurface(inputMesh, inputPolySurf))
     {
-        trace.info() << " [done] (#vertices: " << inputPolySurf.nbVertices() << ")" << std::endl;
+        DGtal::trace.info() << " [done] (#vertices: " << inputPolySurf.nbVertices() << ")" << std::endl;
     }
     else
     {
-        trace.info() << " [failed] (three faces sharing an edge/wrong number of vertices/butterfly neighborhood)" << std::endl;
+        DGtal::trace.info() << " [failed] (three faces sharing an edge/wrong number of vertices/butterfly neighborhood)" << std::endl;
     } */
 
-    std::cout << intersectSurface() << std::endl;
+    DGtal::trace.info() << "Reading input pith coordinates...";
+    std::vector<RealPoint> centerline = DGtal::PointListReader<RealPoint>::getPointsFromFile(centerlineFilename);
+    DGtal::trace.info() << " [done] (#centerline nb of points:" << centerline.size() << ")" <<  std::endl;
+
+    // test mesh (pyramid)
+    PolyMesh mesh = makeBasicPolyMesh();
+
+    unrollTrunk(mesh);
 }
