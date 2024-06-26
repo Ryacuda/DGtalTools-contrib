@@ -72,6 +72,7 @@ struct Ray
     // Methods
     double intersectTriangle(const RealPoint& a, const RealPoint& b, const RealPoint& c) const
     {   // Möller–Trumbore algorithm found here : https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
+        // could use DGtal::RayIntersectionPredicates instead but it doesn't return the t value (yet) that is interesting to me
         RealPoint v1 = b - a;
         RealPoint v2 = c - a;
         RealPoint ray_cross_v2 = myDirection.crossProduct(v2);
@@ -148,50 +149,41 @@ private:
     // Members
     std::vector<RealPoint> mySampledPoints;
     double myMinZ, myMaxZ;
-    double mySampleSize = 20.0;
-    int myNbIntervals;
+    double mySampleSize;
+    int myNbSamples;
 
 public:
     // Constructors
-    SampledCenterline(const std::vector<RealPoint> &aPith, int nbIntervals)
-        : myNbIntervals(nbIntervals), mySampledPoints(nbIntervals)
+    SampledCenterline(std::vector<RealPoint> points, int nbSamples)
+        : myNbSamples(nbSamples), mySampledPoints(nbSamples)
     {
-        if(nbIntervals > aPith.size())
+        if(points.size() < 2)
         {
-            DGtal::trace.warning() << "More samples (" << nbIntervals << ") than actual data." << std::endl;
+            DGtal::trace.warning() << "Can't have less than 2 points for a centerline." << std::endl;
+            return;
         }
 
-        myMaxZ = (*std::max_element(aPith.begin(), aPith.end(),
-                                    [](RealPoint a, RealPoint b){return a[2] < b[2];}))[2];
-        myMinZ = (*std::min_element(aPith.begin(), aPith.end(),
-                                    [](RealPoint a, RealPoint b){return a[2] < b[2];}))[2];
-        
-        mySampleSize = (myMaxZ - myMinZ) / myNbIntervals;
-
-        for (auto const &p: aPith)
+        if(nbSamples > points.size())
         {
-            int i = (int) floor((p[2]-myMinZ)/mySampleSize);
-            mySampledPoints[i] = p;
+            DGtal::trace.warning() << "More samples (" << nbSamples << ") than actual data (" << points.size() << "). Oversampling (duplicate values in sample list)" << std::endl;
         }
 
-        //check if all sample are presents
-        unsigned int n = 0;
-        for (unsigned int i = 0; i < myNbIntervals; i++)
-        {
-            if (mySampledPoints[i] != RealPoint(0,0,0)){
-                n++;
-            }
-        }
+        // ensure points are sorted by z coordinate
+        std::sort(points.begin(), points.end(), [](RealPoint a, RealPoint b){return a[2] < b[2];});
 
-        if (n != mySampledPoints.size())
+        myMinZ = points.front()[2];
+        myMaxZ = points.back()[2];
+        mySampleSize = (myMaxZ - myMinZ) / myNbSamples;
+
+        for (size_t smpl_i = 0; smpl_i < mySampledPoints.size(); smpl_i++)
         {
-            DGtal::trace.warning() << "all samples are not represented: " << n << "over " << myNbIntervals << std::endl;
+            size_t i = smpl_i * points.size() / myNbSamples;
+            mySampledPoints[smpl_i] = points[i];
         }
     }
 
     // Methods
-
-    RealPoint pithRepresentant(const RealPoint &p) const 
+    RealPoint centerlineRepresentant(const RealPoint &p) const 
     {
         unsigned int i = (unsigned int) ceil((p[2]-myMinZ)/mySampleSize);
         assert(i >= 0);
@@ -230,6 +222,7 @@ int main(int argc, char** argv)
     std::string meshFilename;
     std::string centerlineFilename;
     std::string outputFilename = "map.png";
+    int nbSamples;
 
     DGtal::Mesh<DGtal::Z3i::RealPoint> inputMesh;
     PolyMesh inputPolySurf;
@@ -242,9 +235,10 @@ int main(int argc, char** argv)
     app.add_option("--inputmesh,1", meshFilename, "an input mesh file in .obj or .off format." )
     ->required()
     ->check(CLI::ExistingFile);
-    app.add_option("--inputcenterline,2", centerlineFilename, "an input mesh file in .obj or .off format." )
+    app.add_option("--inputcenterline,2", centerlineFilename, "an points coordinates input file" )
     ->required()
     ->check(CLI::ExistingFile);
+    app.add_option("-s,--nbSamples", nbSamples, "number of samples, also image height in pixels" );
     
     // outputs
     app.add_option("-o,--output,3", outputFilename, "an output image file.", true );
@@ -274,9 +268,12 @@ int main(int argc, char** argv)
     DGtal::trace.info() << "Reading input pith coordinates...";
     std::vector<RealPoint> centerline = DGtal::PointListReader<RealPoint>::getPointsFromFile(centerlineFilename);
     DGtal::trace.info() << " [done] (#centerline nb of points:" << centerline.size() << ")" <<  std::endl;
+    SampledCenterline scl(centerline, nbSamples);
 
     // test mesh (pyramid)
     PolyMesh mesh = makeBasicPolyMesh();
 
-    unrollTrunk(mesh);
+    //unrollTrunk(mesh);
+
+
 }
