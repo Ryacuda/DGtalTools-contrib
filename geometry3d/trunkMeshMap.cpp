@@ -111,12 +111,14 @@ struct Ray
     }
 
 
-    double intersectSurface(PolyMesh& aPolysurf) const
+    std::pair<int, double> intersectSurface(PolyMesh& aPolysurf) const
     {
         PolyMesh::PositionsMap pos = aPolysurf.positions();
 
         std::cout << "Number of faces: " << aPolysurf.nbFaces() << std::endl;
 
+        // search for intersect
+        size_t i_min = -1;
         double t_min = std::numeric_limits<double>::infinity();
         for(size_t i = 0; i < aPolysurf.nbFaces(); i++)
         {
@@ -134,28 +136,26 @@ struct Ray
             if(t > 0 && t < t_min)
             {   // intersection exists, replace any previously found intersection if closer to origin
                 t_min = t;
+                i_min = i;
             }
         }
 
-        // return dist value
-        return t_min;
+        // return face index and dist value
+        return std::pair<int, double>(i_min,t_min);
     }
 };
 
 
-class SampledCenterline
+struct SampledCenterline
 {
-private:
     // Members
     std::vector<RealPoint> mySampledPoints;
     double myMinZ, myMaxZ;
     double mySampleSize;
-    int myNbSamples;
 
-public:
     // Constructors
     SampledCenterline(std::vector<RealPoint> points, int nbSamples)
-        : myNbSamples(nbSamples), mySampledPoints(nbSamples)
+        : mySampledPoints(nbSamples)
     {
         if(points.size() < 2)
         {
@@ -163,32 +163,57 @@ public:
             return;
         }
 
-        if(nbSamples > points.size())
-        {
-            DGtal::trace.warning() << "More samples (" << nbSamples << ") than actual data (" << points.size() << "). Oversampling (duplicate values in sample list)" << std::endl;
-        }
-
         // ensure points are sorted by z coordinate
         std::sort(points.begin(), points.end(), [](RealPoint a, RealPoint b){return a[2] < b[2];});
 
         myMinZ = points.front()[2];
         myMaxZ = points.back()[2];
-        mySampleSize = (myMaxZ - myMinZ) / myNbSamples;
+        mySampleSize = (myMaxZ - myMinZ) / nbSamples;
 
-        for (size_t smpl_i = 0; smpl_i < mySampledPoints.size(); smpl_i++)
+        // populate sample list
+        size_t c = 0;
+        size_t j_mem = 0;
+        RealPoint p1 = points[0];
+        RealPoint p2 = points[0];
+        for(size_t i = 0; i < nbSamples; i++)
         {
-            size_t i = smpl_i * points.size() / myNbSamples;
-            mySampledPoints[smpl_i] = points[i];
+            double sampleHeight = myMinZ + mySampleSize/2 + mySampleSize * i;
+
+            for(int j = j_mem; j < points.size(); j++)
+            {
+                p1 = p2;
+                p2 = points[j];
+                c++;
+
+                if(p1[2] < sampleHeight
+                   && p2[2] >= sampleHeight)
+                {   // found the index, interpolating
+                    double a = (sampleHeight - p1[2]) / (p2[2] - p1[2]);
+                    mySampledPoints[i] = p1 + a * (p2 - p1);
+
+                    // remember j index (no need to go over the already passed points again)
+                    j_mem = j;
+
+                    break;
+                }
+            }
         }
+
+        std::cout << c << std::endl;
     }
 
     // Methods
     RealPoint centerlineRepresentant(const RealPoint &p) const 
     {
-        unsigned int i = (unsigned int) ceil((p[2]-myMinZ)/mySampleSize);
+        unsigned int i = (unsigned int) ceil((p[2]-myMinZ)/mySampledPoints.size());
         assert(i >= 0);
         i = std::min((unsigned int)(mySampledPoints.size()-1), i);
         return mySampledPoints[i];
+    }
+
+    RealPoint first()
+    {
+        return mySampledPoints[0];
     }
 };
 
@@ -211,10 +236,33 @@ PolyMesh makeBasicPolyMesh()
 }
 
 
-void unrollTrunk(PolyMesh& aPolysurf)
+struct TrunkMapper
 {
+    // Members
+    PolyMesh myTrunkMesh;
+    SampledCenterline myTrunkCenter;
+    unsigned int myMapWidth;
+    unsigned int myMapHeight;
 
-}
+    // Constructors
+    TrunkMapper(const PolyMesh& aTrunkMesh, std::vector<RealPoint>& points, unsigned int aWidth, unsigned int aHeight)
+        : myTrunkMesh(aTrunkMesh), myTrunkCenter(points, aHeight), myMapWidth(aWidth), myMapHeight(aHeight)
+    {}
+
+    // Methods
+    void map(const std::string& aOutputFilename)
+    {
+        Ray ray(myTrunkCenter.first(), RealPoint(1.0, 0.0, 0.0));
+
+        // find the first triangle that the initial ray connects with
+        std::pair<int, double> res = ray.intersectSurface(myTrunkMesh);
+
+        if(res.first >= 0)
+        {
+            std::cout << "hit !" << std::endl;
+        }
+    }
+};
 
 
 int main(int argc, char** argv)
@@ -222,7 +270,8 @@ int main(int argc, char** argv)
     std::string meshFilename;
     std::string centerlineFilename;
     std::string outputFilename = "map.png";
-    int nbSamples;
+    int nbVSamples;
+    int nbHSamples;
 
     DGtal::Mesh<DGtal::Z3i::RealPoint> inputMesh;
     PolyMesh inputPolySurf;
@@ -238,10 +287,11 @@ int main(int argc, char** argv)
     app.add_option("--inputcenterline,2", centerlineFilename, "an points coordinates input file" )
     ->required()
     ->check(CLI::ExistingFile);
-    app.add_option("-s,--nbSamples", nbSamples, "number of samples, also image height in pixels" );
+    app.add_option("--nbVertSamples", nbVSamples, "number of vertical samples, also image height in pixels" );
+    app.add_option("--nbHoriSamples", nbHSamples, "number of vertical samples, also image height in pixels" );
     
     // outputs
-    app.add_option("-o,--output,3", outputFilename, "an output image file.", true );
+    app.add_option("-o,--output", outputFilename, "an output image file.", true );
 
     app.get_formatter()->column_width(40);
     CLI11_PARSE(app, argc, argv);
@@ -268,12 +318,9 @@ int main(int argc, char** argv)
     DGtal::trace.info() << "Reading input pith coordinates...";
     std::vector<RealPoint> centerline = DGtal::PointListReader<RealPoint>::getPointsFromFile(centerlineFilename);
     DGtal::trace.info() << " [done] (#centerline nb of points:" << centerline.size() << ")" <<  std::endl;
-    SampledCenterline scl(centerline, nbSamples);
 
     // test mesh (pyramid)
     PolyMesh mesh = makeBasicPolyMesh();
 
-    //unrollTrunk(mesh);
-
-
+    TrunkMapper(mesh, centerline, nbHSamples, nbVSamples);
 }
