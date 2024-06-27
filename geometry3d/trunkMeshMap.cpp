@@ -48,9 +48,9 @@
 
 **/
 
-typedef DGtal::PointVector<3,double>               RealPoint;
-typedef DGtal::PolygonalSurface< RealPoint >       PolyMesh;
-typedef PolyMesh::VertexRange               VertexRange;
+typedef DGtal::PointVector<3,double>                RealPoint;
+typedef DGtal::PolygonalSurface<RealPoint>          PolyMesh;
+typedef PolyMesh::VertexRange                       VertexRange;
 
 const RealPoint::Component GLOBAL_epsilon = std::numeric_limits<RealPoint::Component>::epsilon();
 
@@ -250,6 +250,38 @@ struct TrunkMapper
     {}
 
     // Methods
+    RealPoint faceBarycenter(int aFaceID)
+    {
+        VertexRange vertices = myTrunkMesh.verticesAroundFace(aFaceID);
+
+        RealPoint avgPoint;
+        for(const RealPoint& p : vertices)
+        {
+            avgPoint += p;
+        }
+        return avgPoint/vertices.size();
+    }
+
+    double intersectFace(int aFaceID, const Ray& aRay)
+    {
+        VertexRange vertices = aPolysurf.verticesAroundFace(aFaceID);
+
+        // check for intersetion
+        return aRay.intersectTriangle(pos[vertices[0]], pos[vertices[1]], pos[vertices[2]]);
+    }
+
+    void navigateMesh(int aFaceID, const RealPoint& aIntersectApprox, const Ray& aRay)
+    {
+        std::map<int, double> faces;
+        faces[aFaceID] = (faceBarycenter(aFaceID) - aIntersectApprox).norm1();
+
+        double hitDist = aRay.intersectTriangle(faces.front().first);
+        while(hitDist < 0)
+        {
+            faces.
+        }
+    }
+    
     void map(const std::string& aOutputFilename)
     {
         Ray ray(myTrunkCenter.first(), RealPoint(1.0, 0.0, 0.0));
@@ -258,7 +290,7 @@ struct TrunkMapper
         std::pair<int, double> res = ray.intersectSurface(myTrunkMesh);
 
         if(res.first >= 0)
-        {
+        {   // ray intersected a face
             std::cout << "hit !" << std::endl;
         }
     }
