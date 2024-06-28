@@ -171,7 +171,6 @@ struct SampledCenterline
         mySampleSize = (myMaxZ - myMinZ) / nbSamples;
 
         // populate sample list
-        size_t c = 0;
         size_t j_mem = 0;
         RealPoint p1 = points[0];
         RealPoint p2 = points[0];
@@ -183,7 +182,6 @@ struct SampledCenterline
             {
                 p1 = p2;
                 p2 = points[j];
-                c++;
 
                 if(p1[2] < sampleHeight
                    && p2[2] >= sampleHeight)
@@ -198,8 +196,6 @@ struct SampledCenterline
                 }
             }
         }
-
-        std::cout << c << std::endl;
     }
 
     // Methods
@@ -216,24 +212,6 @@ struct SampledCenterline
         return mySampledPoints[0];
     }
 };
-
-PolyMesh makeBasicPolyMesh()
-{   // taken from https://www.dgtal.org/doc/stable/moduleHalfEdgeMesh.html#HEM_sec3_1
-    PolyMesh mesh;
-    mesh.addVertex( RealPoint( 0, 0, 0 ) ); // vertex 0
-    mesh.addVertex( RealPoint( 1, 0, 0 ) ); // vertex 1
-    mesh.addVertex( RealPoint( 0, 1, 0 ) ); // vertex 2
-    mesh.addVertex( RealPoint( 1, 1, 0 ) ); // vertex 3
-    mesh.addVertex( RealPoint( 0.5, 0.5, 1 ) ); // vertex 4
-    mesh.addTriangle( 0, 1, 4 );            // triangle 0
-    mesh.addTriangle( 1, 3, 4 );            // triangle 1
-    mesh.addTriangle( 3, 2, 4 );            // triangle 2
-    mesh.addTriangle( 2, 0, 4 );            // triangle 3
-    mesh.addQuadrangle( 1, 0, 2, 3 );       // quadrangle 4
-    bool ok = mesh.build(); // should be true
-    
-    return mesh;
-}
 
 
 struct TrunkMapper
@@ -255,31 +233,74 @@ struct TrunkMapper
         VertexRange vertices = myTrunkMesh.verticesAroundFace(aFaceID);
 
         RealPoint avgPoint;
-        for(const RealPoint& p : vertices)
+        for(int vertID : vertices)
         {
-            avgPoint += p;
+            avgPoint += myTrunkMesh.position(vertID);
         }
         return avgPoint/vertices.size();
     }
 
     double intersectFace(int aFaceID, const Ray& aRay)
     {
-        VertexRange vertices = aPolysurf.verticesAroundFace(aFaceID);
+        VertexRange vertices = myTrunkMesh.verticesAroundFace(aFaceID);
+        RealPoint p1 = myTrunkMesh.position(vertices[0]);
+        RealPoint p2 = myTrunkMesh.position(vertices[1]);
+        RealPoint p3 = myTrunkMesh.position(vertices[2]);
 
         // check for intersetion
-        return aRay.intersectTriangle(pos[vertices[0]], pos[vertices[1]], pos[vertices[2]]);
+        return aRay.intersectTriangle(p1, p2, p3);
     }
 
-    void navigateMesh(int aFaceID, const RealPoint& aIntersectApprox, const Ray& aRay)
+    double navigateMesh(int aFaceID, const RealPoint& aIntersectApprox, const Ray& aRay)
     {
-        std::map<int, double> faces;
-        faces[aFaceID] = (faceBarycenter(aFaceID) - aIntersectApprox).norm1();
+        std::set<int> visitedFaces;
 
-        double hitDist = aRay.intersectTriangle(faces.front().first);
-        while(hitDist < 0)
+        bool flag = true;   // flag that we can change to false when we want to stop the search
+        while(flag)
         {
-            faces.
+            int bestCandidateFace = -1;
+            double bestDist = std::numeric_limits<double>::infinity();
+            // candidate faces share a vertex with last examined face
+            for(int vertID : myTrunkMesh.verticesAroundFace(aFaceID))
+            {
+                for(int faceID : myTrunkMesh.facesAroundVertex(vertID))
+                {
+                    if(visitedFaces.find(faceID) == visitedFaces.end())
+                    {   // face already tested for intersection
+                        continue;
+                    }
+
+                    double dist = (aIntersectApprox - faceBarycenter(faceID)).norm1();
+                    if(dist < bestDist)
+                    {
+                        bestDist = dist;
+                        bestCandidateFace = faceID;
+                    }
+                }
+            }
+
+            // test if the best candidate intersects with the ray
+            if(bestCandidateFace != -1)
+            {
+                double t = intersectFace(bestCandidateFace, aRay);
+
+                if(t > 0)
+                {   // we stop here
+                    return t;
+                }
+                else
+                {   // we go again
+                    aFaceID = bestCandidateFace;
+                    visitedFaces.insert(aFaceID);
+                }
+            }
+            else
+            {   // we seemingly ran out of candidate for this ray, we give up
+                flag = false;
+            }
         }
+
+        return -1;
     }
     
     void map(const std::string& aOutputFilename)
@@ -302,8 +323,8 @@ int main(int argc, char** argv)
     std::string meshFilename;
     std::string centerlineFilename;
     std::string outputFilename = "map.png";
-    int nbVSamples;
-    int nbHSamples;
+    int nbVSamples = 10;
+    int nbHSamples = 10;
 
     DGtal::Mesh<DGtal::Z3i::RealPoint> inputMesh;
     PolyMesh inputPolySurf;
@@ -313,10 +334,10 @@ int main(int argc, char** argv)
     app.description("trunkMeshMap tool to create a map representation of the surface of a tree trunk (mesh).\n");
     
     // inputs
-    app.add_option("--inputmesh,1", meshFilename, "an input mesh file in .obj or .off format." )
+    app.add_option("--inputMesh,1", meshFilename, "an input mesh file in .obj or .off format." )
     ->required()
     ->check(CLI::ExistingFile);
-    app.add_option("--inputcenterline,2", centerlineFilename, "an points coordinates input file" )
+    app.add_option("--inputCenterline,2", centerlineFilename, "an points coordinates input file" )
     ->required()
     ->check(CLI::ExistingFile);
     app.add_option("--nbVertSamples", nbVSamples, "number of vertical samples, also image height in pixels" );
@@ -330,9 +351,9 @@ int main(int argc, char** argv)
 
     // END parse command line using CLI ----------------------------------------------
 
-    /* // read input mesh and transform into PolyMesh
+    // read input mesh and transform into PolyMesh
     DGtal::trace.info() << "Reading input mesh...";
-    inputMesh << inputFilename;
+    inputMesh << meshFilename;
     DGtal::trace.info() << " [done] (#vertices: " << inputMesh.nbVertex() << ")" << std::endl;
     
     inputMesh.removeIsolatedVertices();
@@ -344,15 +365,12 @@ int main(int argc, char** argv)
     }
     else
     {
-        DGtal::trace.info() << " [failed] (three faces sharing an edge/wrong number of vertices/butterfly neighborhood)" << std::endl;
-    } */
+        DGtal::trace.error() << " [failed] (three faces sharing an edge/wrong number of vertices/butterfly neighborhood)" << std::endl;
+    }
 
-    DGtal::trace.info() << "Reading input pith coordinates...";
+    DGtal::trace.info() << "Reading input centerline...";
     std::vector<RealPoint> centerline = DGtal::PointListReader<RealPoint>::getPointsFromFile(centerlineFilename);
-    DGtal::trace.info() << " [done] (#centerline nb of points:" << centerline.size() << ")" <<  std::endl;
+    DGtal::trace.info() << " [done] (#points: " << centerline.size() << ")" <<  std::endl;
 
-    // test mesh (pyramid)
-    PolyMesh mesh = makeBasicPolyMesh();
-
-    TrunkMapper(mesh, centerline, nbHSamples, nbVSamples);
+    TrunkMapper(inputPolySurf, centerline, nbHSamples, nbVSamples);
 }
