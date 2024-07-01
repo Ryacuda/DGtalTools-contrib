@@ -51,8 +51,20 @@
 typedef DGtal::PointVector<3,double>                RealPoint;
 typedef DGtal::PolygonalSurface<RealPoint>          PolyMesh;
 typedef PolyMesh::VertexRange                       VertexRange;
+typedef DGtal::SimpleMatrix<double, 3, 3>           Matrix3;
 
 const RealPoint::Component GLOBAL_epsilon = std::numeric_limits<RealPoint::Component>::epsilon();
+
+
+Matrix3 makeYawRotationMatrix(double aTheta)
+{
+    double cosTheta = std::cos(aTheta);
+    double sinTheta = std::sin(aTheta);
+    return Matrix3 {cosTheta,   -sinTheta,  0,
+                    sinTheta,   cosTheta,   0,
+                    0,          0,          1};
+}
+
 
 struct Ray
 {
@@ -114,8 +126,6 @@ struct Ray
     std::pair<int, double> intersectSurface(PolyMesh& aPolysurf) const
     {
         PolyMesh::PositionsMap pos = aPolysurf.positions();
-
-        std::cout << "Number of faces: " << aPolysurf.nbFaces() << std::endl;
 
         // search for intersect
         size_t i_min = -1;
@@ -216,6 +226,9 @@ struct SampledCenterline
 
 struct TrunkMapper
 {
+    template<typename TData>
+    using DataMap = std::vector< std::vector< TData > >;
+
     // Members
     PolyMesh myTrunkMesh;
     SampledCenterline myTrunkCenter;
@@ -254,18 +267,21 @@ struct TrunkMapper
     double navigateMesh(int aFaceID, const RealPoint& aIntersectApprox, const Ray& aRay)
     {
         std::set<int> visitedFaces;
+        std::set< std::pair<int, double>> candidateFaces;
 
         bool flag = true;   // flag that we can change to false when we want to stop the search
+        int c = 0;          // count to show the number of loop we end up doing
         while(flag)
         {
             int bestCandidateFace = -1;
             double bestDist = std::numeric_limits<double>::infinity();
+            RealPoint bestFaceCenter;
             // candidate faces share a vertex with last examined face
             for(int vertID : myTrunkMesh.verticesAroundFace(aFaceID))
             {
                 for(int faceID : myTrunkMesh.facesAroundVertex(vertID))
                 {
-                    if(visitedFaces.find(faceID) == visitedFaces.end())
+                    if(visitedFaces.find(faceID) != visitedFaces.end())
                     {   // face already tested for intersection
                         continue;
                     }
@@ -275,21 +291,27 @@ struct TrunkMapper
                     {
                         bestDist = dist;
                         bestCandidateFace = faceID;
+                        bestFaceCenter = faceBarycenter(faceID);
                     }
+
+                    candidateFaces.insert(std::pair<int, double>(faceID, dist));
                 }
             }
 
             // test if the best candidate intersects with the ray
+            std::cout << "Best candidate: " << bestCandidateFace << " (iter " << c++ << ") at " << bestFaceCenter << " ... ";
             if(bestCandidateFace != -1)
             {
                 double t = intersectFace(bestCandidateFace, aRay);
 
                 if(t > 0)
                 {   // we stop here
+                    std::cout << "success!" << std::endl;
                     return t;
                 }
                 else
                 {   // we go again
+                    std::cout << "no hit." << std::endl;
                     aFaceID = bestCandidateFace;
                     visitedFaces.insert(aFaceID);
                 }
@@ -305,15 +327,45 @@ struct TrunkMapper
     
     void map(const std::string& aOutputFilename)
     {
-        Ray ray(myTrunkCenter.first(), RealPoint(1.0, 0.0, 0.0));
+        Ray firstRay(myTrunkCenter.mySampledPoints.front(), RealPoint(1.0, 0.0, 0.0));
+        Matrix3 rotMat(makeYawRotationMatrix(2 * M_PI / myMapWidth));
+
+        DataMap< std::pair<int, double> > dataMap(myMapHeight, std::vector< std::pair<int, double> >(myMapWidth, std::pair<int, double>(-1,0)));
 
         // find the first triangle that the initial ray connects with
-        std::pair<int, double> res = ray.intersectSurface(myTrunkMesh);
+        std::pair<int, double> res = firstRay.intersectSurface(myTrunkMesh);
 
         if(res.first >= 0)
         {   // ray intersected a face
             std::cout << "hit !" << std::endl;
+            dataMap[0][0] = res;
         }
+        else
+        {
+            std::cout << "sad face" << std::endl;    
+        }
+
+        std::cout << dataMap[0][0].first << " " << dataMap[0][0].second << std::endl;
+        
+        std::cout << firstRay.myDirection << std::endl;
+        firstRay.myDirection = (rotMat * firstRay.myDirection).getNormalized();
+        std::cout << firstRay.myDirection << std::endl;
+
+        RealPoint estimatedNextHit = firstRay.myOrigin + firstRay.myDirection * res.second;
+        navigateMesh(res.first, estimatedNextHit, firstRay);
+
+        res = firstRay.intersectSurface(myTrunkMesh);
+        std::cout << res.first << " " << res.second << std::endl;
+
+        /* for(size_t i = 1; i < myTrunkCenter.mySampledPoints.size(); i++)
+        {
+            Ray ray(myTrunkCenter.mySampledPoints[i], RealPoint(1.0, 0.0, 0.0));
+
+            for(size_t j = 0; j < myMapWidth; j++)
+            {
+                
+            }
+        } */
     }
 };
 
@@ -335,11 +387,11 @@ int main(int argc, char** argv)
     
     // inputs
     app.add_option("--inputMesh,1", meshFilename, "an input mesh file in .obj or .off format." )
-    ->required()
-    ->check(CLI::ExistingFile);
+        ->required()
+        ->check(CLI::ExistingFile);
     app.add_option("--inputCenterline,2", centerlineFilename, "an points coordinates input file" )
-    ->required()
-    ->check(CLI::ExistingFile);
+        ->required()
+        ->check(CLI::ExistingFile);
     app.add_option("--nbVertSamples", nbVSamples, "number of vertical samples, also image height in pixels" );
     app.add_option("--nbHoriSamples", nbHSamples, "number of vertical samples, also image height in pixels" );
     
@@ -372,5 +424,6 @@ int main(int argc, char** argv)
     std::vector<RealPoint> centerline = DGtal::PointListReader<RealPoint>::getPointsFromFile(centerlineFilename);
     DGtal::trace.info() << " [done] (#points: " << centerline.size() << ")" <<  std::endl;
 
-    TrunkMapper(inputPolySurf, centerline, nbHSamples, nbVSamples);
+    TrunkMapper TM(inputPolySurf, centerline, nbHSamples, nbVSamples);
+    TM.map(outputFilename);
 }
