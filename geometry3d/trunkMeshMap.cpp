@@ -267,7 +267,10 @@ struct TrunkMapper
     double navigateMesh(int aFaceID, const RealPoint& aIntersectApprox, const Ray& aRay)
     {
         std::set<int> visitedFaces;
-        std::set< std::pair<int, double>> candidateFaces;
+
+        auto cmp = [](const std::pair<int, double>& a, const std::pair<int, double>& b)
+            { return a.second < b.second; };
+        std::set< std::pair<int, double>, decltype(cmp)> candidateFaces(cmp);
 
         bool flag = true;   // flag that we can change to false when we want to stop the search
         int c = 0;          // count to show the number of loop we end up doing
@@ -298,7 +301,37 @@ struct TrunkMapper
                 }
             }
 
-            // test if the best candidate intersects with the ray
+            std::cout << std::endl << c++ << std::endl;
+            for(auto it = candidateFaces.begin(); it != candidateFaces.end(); it++)
+            {
+                std::cout << it->first << "\t" << it->second << std::endl;
+            }
+
+            if(candidateFaces.begin() != candidateFaces.end())
+            {
+                std::cout << "Best candidate: " << candidateFaces.begin()->first << " (iter " << c << ") ... ";
+                double t = intersectFace(candidateFaces.begin()->first, aRay);
+
+                if(t > 0)
+                {   // we stop here
+                    std::cout << "success!" << std::endl;
+                    return t;
+                }
+                else
+                {   // we go again
+                    std::cout << "no hit." << std::endl;
+                    aFaceID = candidateFaces.begin()->first;
+                    visitedFaces.insert(aFaceID);
+                    candidateFaces.erase(candidateFaces.begin());
+                }
+            }
+            else
+            {
+                std::cout << "No faces, exiting" << std::endl;
+                flag = false;
+            }
+
+            /* // test if the best candidate intersects with the ray
             std::cout << "Best candidate: " << bestCandidateFace << " (iter " << c++ << ") at " << bestFaceCenter << " ... ";
             if(bestCandidateFace != -1)
             {
@@ -319,8 +352,10 @@ struct TrunkMapper
             else
             {   // we seemingly ran out of candidate for this ray, we give up
                 flag = false;
-            }
+            } */
         }
+
+        
 
         return -1;
     }
@@ -337,25 +372,45 @@ struct TrunkMapper
 
         if(res.first >= 0)
         {   // ray intersected a face
-            std::cout << "hit !" << std::endl;
             dataMap[0][0] = res;
         }
         else
         {
-            std::cout << "sad face" << std::endl;    
+            std::cout << "sad face" << std::endl;
+            return;
         }
 
-        std::cout << dataMap[0][0].first << " " << dataMap[0][0].second << std::endl;
-        
-        std::cout << firstRay.myDirection << std::endl;
+        RealPoint prevHit = firstRay.myOrigin + firstRay.myDirection * res.second;
         firstRay.myDirection = (rotMat * firstRay.myDirection).getNormalized();
-        std::cout << firstRay.myDirection << std::endl;
-
         RealPoint estimatedNextHit = firstRay.myOrigin + firstRay.myDirection * res.second;
-        navigateMesh(res.first, estimatedNextHit, firstRay);
 
-        res = firstRay.intersectSurface(myTrunkMesh);
-        std::cout << res.first << " " << res.second << std::endl;
+        std::cout << prevHit << std::endl << estimatedNextHit << std::endl;
+
+        int closestFace = -1;
+        int farthestFace = -1;
+        double distFarthest = -std::numeric_limits<double>::infinity();
+        double distClosest = std::numeric_limits<double>::infinity();
+        for(int faceID = 0; faceID < myTrunkMesh.nbFaces(); faceID++)
+        {
+            RealPoint faceCenter = faceBarycenter(faceID);
+            double dist = (faceCenter - estimatedNextHit).norm1();
+            
+            if(dist < distClosest)
+            {
+                distClosest = dist;
+                closestFace = faceID;
+            }
+            else if (dist > distFarthest)
+            {
+                distFarthest = dist;
+                farthestFace = faceID;
+            }
+        }
+
+        std::cout << closestFace << "\t" << distClosest << std::endl;
+        std::cout << farthestFace << "\t" << distFarthest << std::endl;
+
+        //navigateMesh(res.first, estimatedNextHit, firstRay);
 
         /* for(size_t i = 1; i < myTrunkCenter.mySampledPoints.size(); i++)
         {
