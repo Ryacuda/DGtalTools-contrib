@@ -150,7 +150,7 @@ struct Ray
             }
         }
 
-        // return face index and dist value
+        // return face index and dot value
         return std::pair<int, double>(i_min,t_min);
     }
 };
@@ -277,7 +277,7 @@ struct TrunkMapper
         while(flag)
         {
             int bestCandidateFace = -1;
-            double bestDist = std::numeric_limits<double>::infinity();
+            double bestDot = std::numeric_limits<double>::infinity();
             RealPoint bestFaceCenter;
             // candidate faces share a vertex with last examined face
             for(int vertID : myTrunkMesh.verticesAroundFace(aFaceID))
@@ -289,28 +289,32 @@ struct TrunkMapper
                         continue;
                     }
 
-                    double dist = (aIntersectApprox - faceBarycenter(faceID)).norm1();
-                    if(dist < bestDist)
+                    // computing the dot product between the ray's direction and the face's barycenter
+                    RealPoint faceCenterRN = (faceBarycenter(faceID) - aRay.myOrigin).getNormalized();
+                    double dot = faceCenterRN.dot(aRay.myDirection);
+
+                    if(dot > bestDot)
                     {
-                        bestDist = dist;
+                        bestDot = dot;
                         bestCandidateFace = faceID;
                         bestFaceCenter = faceBarycenter(faceID);
                     }
 
-                    candidateFaces.insert(std::pair<int, double>(faceID, dist));
+                    candidateFaces.insert(std::pair<int, double>(faceID, dot));
                 }
             }
 
-            std::cout << std::endl << c++ << std::endl;
+            std::cout << std::endl << c << std::endl;
             for(auto it = candidateFaces.begin(); it != candidateFaces.end(); it++)
             {
                 std::cout << it->first << "\t" << it->second << std::endl;
             }
 
-            if(candidateFaces.begin() != candidateFaces.end())
+            auto bestCndtIterator = candidateFaces.rbegin();
+            if(bestCndtIterator != candidateFaces.rend())
             {
-                std::cout << "Best candidate: " << candidateFaces.begin()->first << " (iter " << c << ") ... ";
-                double t = intersectFace(candidateFaces.begin()->first, aRay);
+                std::cout << "Best candidate: " << bestCndtIterator->first << " (iter " << c++ << ") ... ";
+                double t = intersectFace(bestCndtIterator->first, aRay);
 
                 if(t > 0)
                 {   // we stop here
@@ -320,9 +324,9 @@ struct TrunkMapper
                 else
                 {   // we go again
                     std::cout << "no hit." << std::endl;
-                    aFaceID = candidateFaces.begin()->first;
+                    aFaceID = bestCndtIterator->first;
                     visitedFaces.insert(aFaceID);
-                    candidateFaces.erase(candidateFaces.begin());
+                    candidateFaces.erase((++bestCndtIterator).base());
                 }
             }
             else
@@ -384,33 +388,33 @@ struct TrunkMapper
         firstRay.myDirection = (rotMat * firstRay.myDirection).getNormalized();
         RealPoint estimatedNextHit = firstRay.myOrigin + firstRay.myDirection * res.second;
 
-        std::cout << prevHit << std::endl << estimatedNextHit << std::endl;
+        //std::cout << prevHit << std::endl << estimatedNextHit << std::endl;
 
         int closestFace = -1;
         int farthestFace = -1;
-        double distFarthest = -std::numeric_limits<double>::infinity();
-        double distClosest = std::numeric_limits<double>::infinity();
+        double largestDot = -std::numeric_limits<double>::infinity();
+        double smallestDot = std::numeric_limits<double>::infinity();
         for(int faceID = 0; faceID < myTrunkMesh.nbFaces(); faceID++)
         {
-            RealPoint faceCenter = faceBarycenter(faceID);
-            double dist = (faceCenter - estimatedNextHit).norm1();
+            RealPoint faceCenterRN = (faceBarycenter(faceID) - firstRay.myOrigin).getNormalized();
+            double dot = faceCenterRN.dot(firstRay.myDirection);
             
-            if(dist < distClosest)
+            if(dot < smallestDot)
             {
-                distClosest = dist;
-                closestFace = faceID;
-            }
-            else if (dist > distFarthest)
-            {
-                distFarthest = dist;
+                smallestDot = dot;
                 farthestFace = faceID;
+            }
+            else if (dot > largestDot)
+            {
+                largestDot = dot;
+                closestFace = faceID;
             }
         }
 
-        std::cout << closestFace << "\t" << distClosest << std::endl;
-        std::cout << farthestFace << "\t" << distFarthest << std::endl;
+        //std::cout << closestFace << "\t" << smallestDot << std::endl;
+        //std::cout << farthestFace << "\t" << largestDot << std::endl;
 
-        //navigateMesh(res.first, estimatedNextHit, firstRay);
+        navigateMesh(res.first, estimatedNextHit, firstRay);
 
         /* for(size_t i = 1; i < myTrunkCenter.mySampledPoints.size(); i++)
         {
