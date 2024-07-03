@@ -150,7 +150,7 @@ struct Ray
             }
         }
 
-        // return face index and dot value
+        // return face index and dist value
         return std::pair<int, double>(i_min,t_min);
     }
 };
@@ -226,18 +226,36 @@ struct SampledCenterline
 
 struct TrunkMapper
 {
-    template<typename TData>
-    using DataMap = std::vector< std::vector< TData > >;
+    // struct to hold the per cell data that we compute
+    struct CellData
+    {
+        // Members
+        int myFaceID;
+        double myDist;
+
+        // Constructors
+        CellData()
+            : myFaceID(-1), myDist(0)
+        {}
+
+        CellData(int aFaceID, double aDist)
+            : myFaceID(aFaceID), myDist(aDist)
+        {}
+    };
+
+    typedef std::vector< std::vector< CellData > > DataMap;
 
     // Members
     PolyMesh myTrunkMesh;
     SampledCenterline myTrunkCenter;
+    DataMap myDataMap;
     unsigned int myMapWidth;
     unsigned int myMapHeight;
 
     // Constructors
     TrunkMapper(const PolyMesh& aTrunkMesh, std::vector<RealPoint>& points, unsigned int aWidth, unsigned int aHeight)
-        : myTrunkMesh(aTrunkMesh), myTrunkCenter(points, aHeight), myMapWidth(aWidth), myMapHeight(aHeight)
+        : myTrunkMesh(aTrunkMesh), myTrunkCenter(points, aHeight), myDataMap(myMapHeight, std::vector< CellData >(myMapWidth)),
+        myMapWidth(aWidth), myMapHeight(aHeight)
     {}
 
     // Methods
@@ -264,167 +282,118 @@ struct TrunkMapper
         return aRay.intersectTriangle(p1, p2, p3);
     }
 
-    double navigateMesh(int aFaceID, const RealPoint& aIntersectApprox, const Ray& aRay)
+    CellData navigateMesh(int aFaceID, const Ray& aRay)
     {
+        // contains the ID of faces that have been tested for intersection
         std::set<int> visitedFaces;
 
+        // ordered set that contains candidates for intersection, and other data used to compare them
         auto cmp = [](const std::pair<int, double>& a, const std::pair<int, double>& b)
             { return a.second < b.second; };
         std::set< std::pair<int, double>, decltype(cmp)> candidateFaces(cmp);
 
         bool flag = true;   // flag that we can change to false when we want to stop the search
-        int c = 0;          // count to show the number of loop we end up doing
         while(flag)
         {
-            int bestCandidateFace = -1;
-            double bestDot = std::numeric_limits<double>::infinity();
-            RealPoint bestFaceCenter;
-            // candidate faces share a vertex with last examined face
+            // populate the candidates set with the unvisited neighbours of the last visited face
             for(int vertID : myTrunkMesh.verticesAroundFace(aFaceID))
             {
                 for(int faceID : myTrunkMesh.facesAroundVertex(vertID))
                 {
                     if(visitedFaces.find(faceID) != visitedFaces.end())
-                    {   // face already tested for intersection
+                    {   // face already tested for intersection : skip it
                         continue;
                     }
 
                     // computing the dot product between the ray's direction and the face's barycenter
+                    // the value of the dot product is used to sort the set
+                    // higher value -> face is closer (angle wise) to the ray's direction
                     RealPoint faceCenterRN = (faceBarycenter(faceID) - aRay.myOrigin).getNormalized();
                     double dot = faceCenterRN.dot(aRay.myDirection);
-
-                    if(dot > bestDot)
-                    {
-                        bestDot = dot;
-                        bestCandidateFace = faceID;
-                        bestFaceCenter = faceBarycenter(faceID);
-                    }
 
                     candidateFaces.insert(std::pair<int, double>(faceID, dot));
                 }
             }
 
-            std::cout << std::endl << c << std::endl;
-            for(auto it = candidateFaces.begin(); it != candidateFaces.end(); it++)
-            {
-                std::cout << it->first << "\t" << it->second << std::endl;
-            }
-
+            // iterator to the last element of the set (the face with the highest dot product value)
             auto bestCndtIterator = candidateFaces.rbegin();
             if(bestCndtIterator != candidateFaces.rend())
-            {
-                std::cout << "Best candidate: " << bestCndtIterator->first << " (iter " << c++ << ") ... ";
+            {   // set has at least an element
                 double t = intersectFace(bestCndtIterator->first, aRay);
 
                 if(t > 0)
-                {   // we stop here
-                    std::cout << "success!" << std::endl;
-                    return t;
+                {   // intersection, we stop here
+                    return CellData(bestCndtIterator->first, t);
                 }
                 else
-                {   // we go again
-                    std::cout << "no hit." << std::endl;
-                    aFaceID = bestCndtIterator->first;
-                    visitedFaces.insert(aFaceID);
-                    candidateFaces.erase((++bestCndtIterator).base());
+                {   // no intersection, we mark the face as visited and do another loop
+                    aFaceID = bestCndtIterator->first;                  // last visited face
+                    visitedFaces.insert(aFaceID);                       // add it to the visited face list
+                    candidateFaces.erase((++bestCndtIterator).base());  // remove it from the candidate faces
                 }
             }
             else
-            {
+            {   // set is empty, no candidates, exiting the loop
                 std::cout << "No faces, exiting" << std::endl;
                 flag = false;
             }
-
-            /* // test if the best candidate intersects with the ray
-            std::cout << "Best candidate: " << bestCandidateFace << " (iter " << c++ << ") at " << bestFaceCenter << " ... ";
-            if(bestCandidateFace != -1)
-            {
-                double t = intersectFace(bestCandidateFace, aRay);
-
-                if(t > 0)
-                {   // we stop here
-                    std::cout << "success!" << std::endl;
-                    return t;
-                }
-                else
-                {   // we go again
-                    std::cout << "no hit." << std::endl;
-                    aFaceID = bestCandidateFace;
-                    visitedFaces.insert(aFaceID);
-                }
-            }
-            else
-            {   // we seemingly ran out of candidate for this ray, we give up
-                flag = false;
-            } */
         }
 
-        
-
-        return -1;
+        // we only ever get here when the search fails
+        // so we pay the high price of going through all of the mesh's faces
+        std::pair<int, double> res = aRay.intersectSurface(myTrunkMesh);
+        return CellData(res.first, res.second);
     }
     
-    void map(const std::string& aOutputFilename)
+    void map()
     {
-        Ray firstRay(myTrunkCenter.mySampledPoints.front(), RealPoint(1.0, 0.0, 0.0));
         Matrix3 rotMat(makeYawRotationMatrix(2 * M_PI / myMapWidth));
 
-        DataMap< std::pair<int, double> > dataMap(myMapHeight, std::vector< std::pair<int, double> >(myMapWidth, std::pair<int, double>(-1,0)));
-
-        // find the first triangle that the initial ray connects with
-        std::pair<int, double> res = firstRay.intersectSurface(myTrunkMesh);
-
-        if(res.first >= 0)
-        {   // ray intersected a face
-            dataMap[0][0] = res;
-        }
-        else
-        {
-            std::cout << "sad face" << std::endl;
-            return;
-        }
-
-        RealPoint prevHit = firstRay.myOrigin + firstRay.myDirection * res.second;
-        firstRay.myDirection = (rotMat * firstRay.myDirection).getNormalized();
-        RealPoint estimatedNextHit = firstRay.myOrigin + firstRay.myDirection * res.second;
-
-        //std::cout << prevHit << std::endl << estimatedNextHit << std::endl;
-
-        int closestFace = -1;
-        int farthestFace = -1;
-        double largestDot = -std::numeric_limits<double>::infinity();
-        double smallestDot = std::numeric_limits<double>::infinity();
-        for(int faceID = 0; faceID < myTrunkMesh.nbFaces(); faceID++)
-        {
-            RealPoint faceCenterRN = (faceBarycenter(faceID) - firstRay.myOrigin).getNormalized();
-            double dot = faceCenterRN.dot(firstRay.myDirection);
-            
-            if(dot < smallestDot)
-            {
-                smallestDot = dot;
-                farthestFace = faceID;
-            }
-            else if (dot > largestDot)
-            {
-                largestDot = dot;
-                closestFace = faceID;
-            }
-        }
-
-        //std::cout << closestFace << "\t" << smallestDot << std::endl;
-        //std::cout << farthestFace << "\t" << largestDot << std::endl;
-
-        navigateMesh(res.first, estimatedNextHit, firstRay);
-
-        /* for(size_t i = 1; i < myTrunkCenter.mySampledPoints.size(); i++)
+        // loop over cells
+        int previousFaceID = -1;        // holds the previous cell ID, -1 if it's not available
+        for(size_t i = 0; i < myTrunkCenter.mySampledPoints.size(); i++)
         {
             Ray ray(myTrunkCenter.mySampledPoints[i], RealPoint(1.0, 0.0, 0.0));
 
             for(size_t j = 0; j < myMapWidth; j++)
             {
-                
+                if(previousFaceID != -1)
+                {
+                    myDataMap[i][j] = navigateMesh(previousFaceID, ray);
+                }
+                else
+                {
+                    std::pair<int, double> res = ray.intersectSurface(myTrunkMesh);
+                    
+                    myDataMap[i][j].myFaceID = res.first;
+                    myDataMap[i][j].myDist = res.second;
+                    
+                    previousFaceID = res.first;
+                }
+
+                previousFaceID = myDataMap[i][j].myFaceID;
+
+                // rotate ray for next point in line
+                ray.myDirection = rotMat * ray.myDirection;
             }
-        } */
+
+            // change previousFaceID to be the direct cell below rather than the last of last line
+            previousFaceID = (myDataMap[i][0].myFaceID == -1 ? myDataMap[i][0].myFaceID : previousFaceID);
+        }
+    }
+
+    void saveDistMap(const std::string& distMapFilename)
+    {
+        using Domain = DGtal::Z2i::Domain;
+        using Point = DGtal::Z2i::Point;
+        
+        Domain dom(Point(0,0), Point(10,10));
+        DGtal::ImageContainerBySTLVector<Domain, CellData> image(dom);
+
+        for(auto it = image.range().begin(); it != image.range().end(); it++)
+        {
+            //
+        }
     }
 };
 
@@ -484,5 +453,5 @@ int main(int argc, char** argv)
     DGtal::trace.info() << " [done] (#points: " << centerline.size() << ")" <<  std::endl;
 
     TrunkMapper TM(inputPolySurf, centerline, nbHSamples, nbVSamples);
-    TM.map(outputFilename);
+    TM.map();
 }
