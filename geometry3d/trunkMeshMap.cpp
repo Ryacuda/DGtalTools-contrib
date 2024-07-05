@@ -37,6 +37,13 @@
 #include "DGtal/io/readers/MeshReader.h"
 #include "DGtal/io/writers/MeshWriter.h"
 #include <DGtal/geometry/tools/RayIntersectionPredicates.h>
+#include <DGtal/images/ArrayImageAdapter.h>
+#include <DGtal/io/writers/GenericWriter.h>
+#include "DGtal/base/BasicFunctors.h"
+#include "DGtal/io/colormaps/GradientColorMap.h"
+#include "DGtal/io/colormaps/BasicColorToScalarFunctors.h"
+#include "DGtal/base/FunctorHolder.h"
+#include "DGtal/io/colormaps/GradientColorMap.h"
 
 #include <algorithm>
 #include <cmath>
@@ -254,8 +261,8 @@ struct TrunkMapper
 
     // Constructors
     TrunkMapper(const PolyMesh& aTrunkMesh, std::vector<RealPoint>& points, unsigned int aWidth, unsigned int aHeight)
-        : myTrunkMesh(aTrunkMesh), myTrunkCenter(points, aHeight), myDataMap(myMapHeight, std::vector< CellData >(myMapWidth)),
-        myMapWidth(aWidth), myMapHeight(aHeight)
+        : myDataMap(aHeight, std::vector< CellData >(aWidth)), myTrunkMesh(aTrunkMesh),
+          myTrunkCenter(points, aHeight), myMapWidth(aWidth), myMapHeight(aHeight)
     {}
 
     // Methods
@@ -386,14 +393,39 @@ struct TrunkMapper
     {
         using Domain = DGtal::Z2i::Domain;
         using Point = DGtal::Z2i::Point;
-        
-        Domain dom(Point(0,0), Point(10,10));
-        DGtal::ImageContainerBySTLVector<Domain, CellData> image(dom);
+        using Image2D = DGtal::ImageContainerBySTLVector<Domain, double>;
 
-        for(auto it = image.range().begin(); it != image.range().end(); it++)
+        Domain dom(Point(0,0), Point(myMapWidth -1,myMapHeight -1));
+        Image2D image(dom);
+
+        for(int i = 0; i < myMapHeight; i++)
         {
-            //
+            for(int j = 0; j < myMapWidth; j++)
+            {
+                double d = myDataMap[i][j].myDist;
+                if(std::isfinite(d))
+                {
+                    image.setValue(Point(j,i), myDataMap[i][j].myDist);
+                }
+                else
+                {
+                    image.setValue(Point(j,i), 0);
+                }
+            }
         }
+
+        auto minmax = std::minmax_element(image.constRange().begin(), image.constRange().end());
+
+        std::cout << *minmax.first << "\t" << *minmax.second << std::endl;
+
+        DGtal::GradientColorMap<double> distcolormap(*minmax.first, *minmax.second);
+        distcolormap.addColor( DGtal::Color( 180, 0, 0 ) );   // blue
+	    distcolormap.addColor( DGtal::Color( 200, 10, 10 ) );
+
+        distcolormap(1.2);
+
+        DGtal::STBWriter<Image2D, DGtal::GradientColorMap<double> >::exportPNG("test.png", image, distcolormap);
+
     }
 };
 
@@ -454,4 +486,6 @@ int main(int argc, char** argv)
 
     TrunkMapper TM(inputPolySurf, centerline, nbHSamples, nbVSamples);
     TM.map();
+
+    TM.saveDistMap(outputFilename);
 }
