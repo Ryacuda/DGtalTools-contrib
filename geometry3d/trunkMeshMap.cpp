@@ -52,13 +52,19 @@
 
 /**
 
-
+doc :)
 **/
 
-typedef DGtal::PointVector<3,double>                RealPoint;
-typedef DGtal::PolygonalSurface<RealPoint>          PolyMesh;
-typedef PolyMesh::VertexRange                       VertexRange;
-typedef DGtal::SimpleMatrix<double, 3, 3>           Matrix3;
+using RealPoint     = DGtal::PointVector<3,double>;
+using Point         = DGtal::Z2i::Point;
+using Domain        = DGtal::Z2i::Domain;
+using PolyMesh      = DGtal::PolygonalSurface<RealPoint>;
+using VertexRange   = PolyMesh::VertexRange;
+using Matrix3       = DGtal::SimpleMatrix<double, 3, 3>;
+
+template<typename TValue>
+using Image2D       = DGtal::ImageContainerBySTLVector<Domain, TValue>;
+
 
 const RealPoint::Component GLOBAL_epsilon = std::numeric_limits<RealPoint::Component>::epsilon();
 
@@ -239,13 +245,14 @@ struct TrunkMapper
         // Members
         int myFaceID;
         double myDist;
+        RealPoint myNormal;
 
         // Constructors
         CellData()
             : myFaceID(-1), myDist(0)
         {}
 
-        CellData(int aFaceID, double aDist)
+        CellData(int aFaceID, double aDist, const RealPoint& aNormal)
             : myFaceID(aFaceID), myDist(aDist)
         {}
     };
@@ -349,7 +356,7 @@ struct TrunkMapper
         // we only ever get here when the search fails
         // so we pay the high price of going through all of the mesh's faces
         std::pair<int, double> res = aRay.intersectSurface(myTrunkMesh);
-        return CellData(res.first, res.second);
+        return CellData(res.first, res.second,);
     }
     
     void map()
@@ -391,12 +398,8 @@ struct TrunkMapper
 
     void saveDistMap(const std::string& distMapFilename)
     {
-        using Domain = DGtal::Z2i::Domain;
-        using Point = DGtal::Z2i::Point;
-        using Image2D = DGtal::ImageContainerBySTLVector<Domain, double>;
-
         Domain dom(Point(0,0), Point(myMapWidth -1,myMapHeight -1));
-        Image2D image(dom);
+        Image2D<double> distMapImage(dom);
 
         for(int i = 0; i < myMapHeight; i++)
         {
@@ -405,16 +408,16 @@ struct TrunkMapper
                 double d = myDataMap[i][j].myDist;
                 if(std::isfinite(d))
                 {
-                    image.setValue(Point(j,i), myDataMap[i][j].myDist);
+                    distMapImage.setValue(Point(j,i), myDataMap[i][j].myDist);
                 }
                 else
                 {
-                    image.setValue(Point(j,i), 0);
+                    distMapImage.setValue(Point(j,i), 0);
                 }
             }
         }
 
-        auto minmax = std::minmax_element(image.constRange().begin(), image.constRange().end());
+        auto minmax = std::minmax_element(distMapImage.constRange().begin(), distMapImage.constRange().end());
 
         std::cout << *minmax.first << "\t" << *minmax.second << std::endl;
 
@@ -422,10 +425,36 @@ struct TrunkMapper
         distcolormap.addColor( DGtal::Color( 180, 0, 0 ) );   // blue
 	    distcolormap.addColor( DGtal::Color( 200, 10, 10 ) );
 
-        distcolormap(1.2);
+        DGtal::STBWriter< Image2D<double>, DGtal::GradientColorMap<double> >::exportPNG(distMapFilename, distMapImage, distcolormap);
+    }
 
-        DGtal::STBWriter<Image2D, DGtal::GradientColorMap<double> >::exportPNG("test.png", image, distcolormap);
 
+    void saveNormalMap(const std::string& normalMapFilename)
+    {
+        Domain dom(Point(0,0), Point(myMapWidth -1,myMapHeight -1));
+        Image2D<DGtal::Color> distMapImage(dom);
+
+        for(int i = 0; i < myMapHeight; i++)
+        {
+            for(int j = 0; j < myMapWidth; j++)
+            {
+                double d = myDataMap[i][j].myDist;
+                if(std::isfinite(d))
+                {
+                    // color
+                }
+                else
+                {   // Transparent Color
+                    distMapImage.setValue(Point(j,i), DGtal::Color(0,0,0,0));
+                }
+            }
+        }
+
+        auto minmax = std::minmax_element(distMapImage.constRange().begin(), distMapImage.constRange().end());
+
+        std::cout << *minmax.first << "\t" << *minmax.second << std::endl;
+
+        DGtal::STBWriter< Image2D<DGtal::Color> >::exportPNG(normalMapFilename, distMapImage);
     }
 };
 
