@@ -253,7 +253,7 @@ struct TrunkMapper
         {}
 
         CellData(int aFaceID, double aDist, const RealPoint& aNormal)
-            : myFaceID(aFaceID), myDist(aDist)
+            : myFaceID(aFaceID), myDist(aDist), myNormal(aNormal)
         {}
     };
 
@@ -283,6 +283,17 @@ struct TrunkMapper
             avgPoint += myTrunkMesh.position(vertID);
         }
         return avgPoint/vertices.size();
+    }
+
+
+    RealPoint faceNormal(int aFaceID)
+    {
+        VertexRange vertices = myTrunkMesh.verticesAroundFace(aFaceID);
+
+        RealPoint v1 = myTrunkMesh.position(vertices[1]) - myTrunkMesh.position(vertices[0]);
+        RealPoint v2 = myTrunkMesh.position(vertices[2]) - myTrunkMesh.position(vertices[0]);
+
+        return v1.crossProduct(v2).getNormalized();
     }
 
     double intersectFace(int aFaceID, const Ray& aRay)
@@ -337,7 +348,10 @@ struct TrunkMapper
 
                 if(t > 0)
                 {   // intersection, we stop here
-                    return CellData(bestCndtIterator->first, t);
+                    RealPoint n = faceNormal(bestCndtIterator->first);
+                    return CellData(bestCndtIterator->first, t, RealPoint(n[2],
+                                                     n[0] * aRay.myDirection[1] + n[1] * aRay.myDirection[0],
+                                                     n[1] * aRay.myDirection[1] - n[0] * aRay.myDirection[0]));
                 }
                 else
                 {   // no intersection, we mark the face as visited and do another loop
@@ -356,7 +370,10 @@ struct TrunkMapper
         // we only ever get here when the search fails
         // so we pay the high price of going through all of the mesh's faces
         std::pair<int, double> res = aRay.intersectSurface(myTrunkMesh);
-        return CellData(res.first, res.second,);
+        RealPoint n = faceNormal(res.first);
+        return CellData(res.first, res.second, RealPoint(n[2],
+                                                     n[0] * aRay.myDirection[1] + n[1] * aRay.myDirection[0],
+                                                     n[1] * aRay.myDirection[1] - n[0] * aRay.myDirection[0]));
     }
     
     void map()
@@ -395,6 +412,23 @@ struct TrunkMapper
             previousFaceID = (myDataMap[i][0].myFaceID == -1 ? myDataMap[i][0].myFaceID : previousFaceID);
         }
     }
+
+
+    void test()
+    {
+        Ray ray(RealPoint(), RealPoint(1, 0.0, 0.0).getNormalized());
+        std::pair<int, double> res = ray.intersectSurface(myTrunkMesh);
+
+        RealPoint n = faceNormal(res.first);
+        
+        CellData cd(res.first, res.second, RealPoint(n[2],
+                                                     n[0] * ray.myDirection[1] + n[1] * ray.myDirection[0],
+                                                     n[1] * ray.myDirection[1] - n[0] * ray.myDirection[0]));
+        
+        std::cout << "normal :" << n << std::endl;
+        std::cout << cd.myNormal << std::endl;
+    }
+
 
     void saveDistMap(const std::string& distMapFilename)
     {
@@ -441,7 +475,10 @@ struct TrunkMapper
                 double d = myDataMap[i][j].myDist;
                 if(std::isfinite(d))
                 {
-                    // color
+                    unsigned char r = (myDataMap[i][j].myNormal[0] + 1) * 127.5;
+                    unsigned char g = (myDataMap[i][j].myNormal[1] + 1) * 127.5;
+                    unsigned char b = 128 - myDataMap[i][j].myNormal[2] * 127;
+                    distMapImage.setValue(Point(j,i), DGtal::Color(r, g, b));
                 }
                 else
                 {   // Transparent Color
@@ -514,7 +551,9 @@ int main(int argc, char** argv)
     DGtal::trace.info() << " [done] (#points: " << centerline.size() << ")" <<  std::endl;
 
     TrunkMapper TM(inputPolySurf, centerline, nbHSamples, nbVSamples);
+    //TM.test();
     TM.map();
 
-    TM.saveDistMap(outputFilename);
+    //TM.saveDistMap(outputFilename);
+    TM.saveNormalMap("normalmap.png");
 }
