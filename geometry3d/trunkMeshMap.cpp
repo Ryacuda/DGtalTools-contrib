@@ -349,9 +349,9 @@ struct TrunkMapper
                 if(t > 0)
                 {   // intersection, we stop here
                     RealPoint n = faceNormal(bestCndtIterator->first);
-                    return CellData(bestCndtIterator->first, t, RealPoint(n[2],
-                                                     n[0] * aRay.myDirection[1] + n[1] * aRay.myDirection[0],
-                                                     n[1] * aRay.myDirection[1] - n[0] * aRay.myDirection[0]));
+                    return CellData(bestCndtIterator->first, t, RealPoint(- n[2],
+                                                     n[0] * aRay.myDirection[1] - n[1] * aRay.myDirection[0],
+                                                     - n[0] * aRay.myDirection[0] - n[1] * aRay.myDirection[1]));
                 }
                 else
                 {   // no intersection, we mark the face as visited and do another loop
@@ -370,10 +370,15 @@ struct TrunkMapper
         // we only ever get here when the search fails
         // so we pay the high price of going through all of the mesh's faces
         std::pair<int, double> res = aRay.intersectSurface(myTrunkMesh);
-        RealPoint n = faceNormal(res.first);
-        return CellData(res.first, res.second, RealPoint(n[2],
-                                                     n[0] * aRay.myDirection[1] + n[1] * aRay.myDirection[0],
-                                                     n[1] * aRay.myDirection[1] - n[0] * aRay.myDirection[0]));
+        if(res.first != -1)
+        {
+            RealPoint n = faceNormal(res.first);
+            return CellData(res.first, res.second, RealPoint(- n[2],
+                                                     n[0] * aRay.myDirection[1] - n[1] * aRay.myDirection[0],
+                                                     - n[0] * aRay.myDirection[0] - n[1] * aRay.myDirection[1]));
+        }
+        
+        return CellData(res.first, res.second, RealPoint());
     }
     
     void map()
@@ -414,16 +419,21 @@ struct TrunkMapper
     }
 
 
-    void test()
+    void test(const RealPoint& p)
     {
-        Ray ray(RealPoint(), RealPoint(1, 0.0, 0.0).getNormalized());
+        Ray ray(RealPoint(), p);
         std::pair<int, double> res = ray.intersectSurface(myTrunkMesh);
+
+        if(res.first == -1)
+        {
+            return;
+        }
 
         RealPoint n = faceNormal(res.first);
         
-        CellData cd(res.first, res.second, RealPoint(n[2],
-                                                     n[0] * ray.myDirection[1] + n[1] * ray.myDirection[0],
-                                                     n[1] * ray.myDirection[1] - n[0] * ray.myDirection[0]));
+        CellData cd(res.first, res.second, RealPoint(- n[2],
+                                                     n[0] * ray.myDirection[1] - n[1] * ray.myDirection[0],
+                                                     - n[0] * ray.myDirection[0] - n[1] * ray.myDirection[1]));
         
         std::cout << "normal :" << n << std::endl;
         std::cout << cd.myNormal << std::endl;
@@ -456,7 +466,7 @@ struct TrunkMapper
         std::cout << *minmax.first << "\t" << *minmax.second << std::endl;
 
         DGtal::GradientColorMap<double> distcolormap(*minmax.first, *minmax.second);
-        distcolormap.addColor( DGtal::Color( 180, 0, 0 ) );   // blue
+        distcolormap.addColor( DGtal::Color( 100, 0, 0 ) );   // blue
 	    distcolormap.addColor( DGtal::Color( 200, 10, 10 ) );
 
         DGtal::STBWriter< Image2D<double>, DGtal::GradientColorMap<double> >::exportPNG(distMapFilename, distMapImage, distcolormap);
@@ -478,6 +488,12 @@ struct TrunkMapper
                     unsigned char r = (myDataMap[i][j].myNormal[0] + 1) * 127.5;
                     unsigned char g = (myDataMap[i][j].myNormal[1] + 1) * 127.5;
                     unsigned char b = 128 - myDataMap[i][j].myNormal[2] * 127;
+
+                    if(b < 128)
+                    {
+                        std::cout << (unsigned int) r << " " << (unsigned int) g << " " << (unsigned int) b << std::endl;
+                    }
+
                     distMapImage.setValue(Point(j,i), DGtal::Color(r, g, b));
                 }
                 else
@@ -501,8 +517,8 @@ int main(int argc, char** argv)
     std::string meshFilename;
     std::string centerlineFilename;
     std::string outputFilename = "map.png";
-    int nbVSamples = 10;
-    int nbHSamples = 10;
+    int nbVSamples = 200;
+    int nbHSamples = 200;
 
     DGtal::Mesh<DGtal::Z3i::RealPoint> inputMesh;
     PolyMesh inputPolySurf;
@@ -551,9 +567,9 @@ int main(int argc, char** argv)
     DGtal::trace.info() << " [done] (#points: " << centerline.size() << ")" <<  std::endl;
 
     TrunkMapper TM(inputPolySurf, centerline, nbHSamples, nbVSamples);
-    //TM.test();
+    //TM.test(RealPoint(1, 0.0, 0.0).getNormalized());
     TM.map();
 
-    //TM.saveDistMap(outputFilename);
+    TM.saveDistMap(outputFilename);
     TM.saveNormalMap("normalmap.png");
 }
