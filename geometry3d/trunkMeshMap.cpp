@@ -213,8 +213,7 @@ struct SampledCenterline
                     mySampledPoints[i] = p1 + a * (p2 - p1);
 
                     // remember j index (no need to go over the already passed points again)
-                    j_mem = j;
-
+                    j_mem = j-1;
                     break;
                 }
             }
