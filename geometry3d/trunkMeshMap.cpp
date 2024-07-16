@@ -265,6 +265,8 @@ struct TrunkMapper
     unsigned int myMapWidth;
     unsigned int myMapHeight;
 
+    std::vector<int> listoftries;
+
     // Constructors
     TrunkMapper(const PolyMesh& aTrunkMesh, std::vector<RealPoint>& points, unsigned int aWidth, unsigned int aHeight)
         : myDataMap(aHeight, std::vector< CellData >(aWidth)), myTrunkMesh(aTrunkMesh),
@@ -306,7 +308,7 @@ struct TrunkMapper
         return aRay.intersectTriangle(p1, p2, p3);
     }
 
-    CellData navigateMesh(int aFaceID, const Ray& aRay)
+    CellData navigateMesh(int aFaceID, const Ray& aRay, bool memory = true)
     {
         // contains the ID of faces that have been tested for intersection
         std::set<int> visitedFaces;
@@ -316,6 +318,7 @@ struct TrunkMapper
             { return a.second < b.second; };
         std::set< std::pair<int, double>, decltype(cmp)> candidateFaces(cmp);
 
+        int c = 0;
         bool flag = true;   // flag that we can change to false when we want to stop the search
         while(flag)
         {
@@ -344,10 +347,12 @@ struct TrunkMapper
             if(bestCndtIterator != candidateFaces.rend())
             {   // set has at least an element
                 double t = intersectFace(bestCndtIterator->first, aRay);
+                c++;
 
                 if(t > 0)
                 {   // intersection, we stop here
                     RealPoint n = faceNormal(bestCndtIterator->first);
+                    listoftries.emplace_back(c);
                     return CellData(bestCndtIterator->first, t, RealPoint(- n[2],
                                                      n[0] * aRay.myDirection[1] - n[1] * aRay.myDirection[0],
                                                      - n[0] * aRay.myDirection[0] - n[1] * aRay.myDirection[1]));
@@ -356,7 +361,14 @@ struct TrunkMapper
                 {   // no intersection, we mark the face as visited and do another loop
                     aFaceID = bestCndtIterator->first;                  // last visited face
                     visitedFaces.insert(aFaceID);                       // add it to the visited face list
-                    candidateFaces.erase((++bestCndtIterator).base());  // remove it from the candidate faces
+                    if(memory)
+                    {   // only remove the last tested face from candidate list
+                        candidateFaces.erase((++bestCndtIterator).base());
+                    }
+                    else
+                    {   // clear candidate list : we search only the neighbours of the best last candidate
+                        candidateFaces.clear();
+                    }
                 }
             }
             else
@@ -366,6 +378,7 @@ struct TrunkMapper
             }
         }
 
+        listoftries.emplace_back(c);
         // we only ever get here when the search fails
         // so we pay the high price of going through all of the mesh's faces
         std::pair<int, double> res = aRay.intersectSurface(myTrunkMesh);
@@ -394,7 +407,7 @@ struct TrunkMapper
             {
                 if(previousFaceID != -1)
                 {
-                    myDataMap[i][j] = navigateMesh(previousFaceID, ray);
+                    myDataMap[i][j] = navigateMesh(previousFaceID, ray, false);
                 }
                 else
                 {
@@ -414,6 +427,23 @@ struct TrunkMapper
 
             // change previousFaceID to be the direct cell below rather than the last of last line
             previousFaceID = (myDataMap[i][0].myFaceID == -1 ? myDataMap[i][0].myFaceID : previousFaceID);
+        }
+
+        // number of tries search
+        int n = 20;
+        auto minmax = std::minmax_element(listoftries.begin(), listoftries.end());
+        std::cout << *minmax.first << " " << *minmax.second << std::endl << std::endl;
+        std::vector<int> hist(20, 0);
+
+        for(int i : listoftries)
+        {
+            hist[(n-1) * (i - *minmax.first) / (*minmax.second - *minmax.first)]++;
+        }
+
+        for(int i = 0; i < hist.size(); i++)
+        {
+            std::cout << "[" << ((double)i)/n * (*minmax.second - *minmax.first) + *minmax.first << ", " 
+                             << ((double)i+1)/n * (*minmax.second - *minmax.first) + *minmax.first << "] : " << hist[i] << std::endl;
         }
     }
 
@@ -462,11 +492,10 @@ struct TrunkMapper
 
         auto minmax = std::minmax_element(distMapImage.constRange().begin(), distMapImage.constRange().end());
 
-        std::cout << *minmax.first << "\t" << *minmax.second << std::endl;
-
         DGtal::GradientColorMap<double> distcolormap(*minmax.first, *minmax.second);
-        distcolormap.addColor( DGtal::Color( 100, 0, 0 ) );   // blue
-	    distcolormap.addColor( DGtal::Color( 200, 10, 10 ) );
+        distcolormap.addColor( DGtal::Color( 240, 10, 0 ) );        // red
+        distcolormap.addColor( DGtal::Color( 170, 40, 140 ) );      // purple
+	    distcolormap.addColor( DGtal::Color( 0,   10, 240 ) );      // blue
 
         DGtal::STBWriter< Image2D<double>, DGtal::GradientColorMap<double> >::exportPNG(distMapFilename, distMapImage, distcolormap);
     }
@@ -475,7 +504,7 @@ struct TrunkMapper
     void saveNormalMap(const std::string& normalMapFilename)
     {
         Domain dom(Point(0,0), Point(myMapWidth -1,myMapHeight -1));
-        Image2D<DGtal::Color> distMapImage(dom);
+        Image2D<DGtal::Color> normalMapImage(dom);
 
         for(int i = 0; i < myMapHeight; i++)
         {
@@ -488,25 +517,85 @@ struct TrunkMapper
                     unsigned char g = (myDataMap[i][j].myNormal[1] + 1) * 127.5;
                     unsigned char b = 128 - myDataMap[i][j].myNormal[2] * 127;
 
-                    if(b < 128)
+                    /* if(b < 128)
                     {
                         std::cout << (unsigned int) r << " " << (unsigned int) g << " " << (unsigned int) b << std::endl;
-                    }
+                    } */
 
-                    distMapImage.setValue(Point(j,i), DGtal::Color(r, g, b));
+                    normalMapImage.setValue(Point(j,i), DGtal::Color(r, g, b));
                 }
                 else
                 {   // Transparent Color
-                    distMapImage.setValue(Point(j,i), DGtal::Color(0,0,0,0));
+                    normalMapImage.setValue(Point(j,i), DGtal::Color(0,0,0,0));
                 }
             }
         }
 
-        auto minmax = std::minmax_element(distMapImage.constRange().begin(), distMapImage.constRange().end());
+        auto minmax = std::minmax_element(normalMapImage.constRange().begin(), normalMapImage.constRange().end());
 
-        std::cout << *minmax.first << "\t" << *minmax.second << std::endl;
+        DGtal::STBWriter< Image2D<DGtal::Color> >::exportPNG(normalMapFilename, normalMapImage);
+    }
 
-        DGtal::STBWriter< Image2D<DGtal::Color> >::exportPNG(normalMapFilename, distMapImage);
+    void saveDeltaDistMap(const std::string& deltaDistMapFilename)
+    {
+        int patchWidth = 30;
+        int patchHeight = 5;
+        Domain dom(Point(0,0), Point(myMapWidth -1,myMapHeight -1));
+        Image2D<double> deltaDistMapImage(dom);
+
+        for(int i = 0; i < myMapHeight; i++)
+        {
+            for(int j = 0; j < myMapWidth; j++)
+            {
+                // get distance
+                double d = myDataMap[i][j].myDist;
+                if(!std::isfinite(d))
+                {
+                    d = 0;
+                }
+
+                // compute average distance
+                double avgDist = 0;
+                int count = 0;
+                for(int di = -patchHeight/2; di < patchHeight/2; di++)
+                {
+                    int new_i = i + di;
+                    if(new_i >= (int) myMapHeight || new_i < 0 )
+                    {   // outside of image bounds
+                        continue;
+                    }
+
+                    for(int dj = -patchWidth/2; dj < patchWidth/2; dj++)
+                    {
+                        int new_j = j + dj;
+                        if(new_j >= (int) myMapWidth)
+                        {   // outside of image bound, but we adjust it
+                            new_j -= myMapWidth;
+                        }
+                        else if(new_j < 0)
+                        {
+                            new_j += myMapWidth;
+                        }
+
+                        avgDist += deltaDistMapImage(Point(new_j,new_i));
+                        count++;
+                    }
+                }
+                std::cout << count << std::endl;;
+                avgDist /= count;
+
+                deltaDistMapImage.setValue(Point(j,i), avgDist - d);
+            }
+        }
+
+        auto minmax = std::minmax_element(deltaDistMapImage.constRange().begin(), deltaDistMapImage.constRange().end());
+
+        DGtal::GradientColorMap<double> distcolormap(*minmax.first, *minmax.second);
+        distcolormap.addColor( DGtal::Color( 240, 10, 0 ) );        // red
+        distcolormap.addColor( DGtal::Color( 170, 40, 140 ) );      // purple
+	    distcolormap.addColor( DGtal::Color( 0,   10, 240 ) );      // blue
+
+        DGtal::STBWriter< Image2D<double>, DGtal::GradientColorMap<double> >::exportPNG(deltaDistMapFilename, deltaDistMapImage, distcolormap);
     }
 };
 
@@ -571,4 +660,5 @@ int main(int argc, char** argv)
 
     TM.saveDistMap(outputFilename);
     TM.saveNormalMap("normalmap.png");
+    TM.saveDeltaDistMap("deltadistmap.png");
 }

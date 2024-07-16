@@ -513,7 +513,7 @@ int main( int argc, char** argv )
         }
 
         fout.close();
-        trace.info() << "[done]." << std::endl;
+        trace.info() << "[done]" << std::endl;
     }
 
     return 0;
