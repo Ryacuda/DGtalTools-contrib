@@ -577,8 +577,12 @@ struct TrunkMapper
                             new_j += myMapWidth;
                         }
 
-                        sumDist += myDataMap[new_i][new_j].myDist;
-                        count++;
+                        double neighbourDist = myDataMap[new_i][new_j].myDist;
+                        if(std::isfinite(neighbourDist))
+                        {   // neighbour is at finite distance
+                            sumDist += neighbourDist;
+                            count++;
+                        }   // else we ignore it
                     }
                 }
                 sumDist /= count;
@@ -657,12 +661,10 @@ int main(int argc, char** argv)
     //TM.test(RealPoint(1, 0.0, 0.0).getNormalized());
     TM.map();
 
-    int c = 0;
-    std::cout << c++ << std::endl; 
     TM.saveDistMap(outputFilename);
-    std::cout << c++ << std::endl;
+
     TM.saveNormalMap("normalmap.png");
-    std::cout << c++ << std::endl;
+
     TM.saveDeltaDistMap("deltadistmap.png");
-    std::cout << c++ << std::endl;
+
 }
