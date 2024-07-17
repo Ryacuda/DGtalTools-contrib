@@ -538,8 +538,8 @@ struct TrunkMapper
 
     void saveDeltaDistMap(const std::string& deltaDistMapFilename)
     {
-        int patchWidth = 30;
-        int patchHeight = 5;
+        int patchWidth = 2;
+        int patchHeight = 2;
         Domain dom(Point(0,0), Point(myMapWidth -1,myMapHeight -1));
         Image2D<double> deltaDistMapImage(dom);
 
@@ -555,7 +555,7 @@ struct TrunkMapper
                 }
 
                 // compute average distance
-                double avgDist = 0;
+                double sumDist = 0;
                 int count = 0;
                 for(int di = -patchHeight/2; di < patchHeight/2; di++)
                 {
@@ -577,14 +577,13 @@ struct TrunkMapper
                             new_j += myMapWidth;
                         }
 
-                        avgDist += deltaDistMapImage(Point(new_j,new_i));
+                        sumDist += myDataMap[new_i][new_j].myDist;
                         count++;
                     }
                 }
-                std::cout << count << std::endl;;
-                avgDist /= count;
+                sumDist /= count;
 
-                deltaDistMapImage.setValue(Point(j,i), avgDist - d);
+                deltaDistMapImage.setValue(Point(j,i), d - sumDist/count);
             }
         }
 
@@ -658,7 +657,12 @@ int main(int argc, char** argv)
     //TM.test(RealPoint(1, 0.0, 0.0).getNormalized());
     TM.map();
 
+    int c = 0;
+    std::cout << c++ << std::endl; 
     TM.saveDistMap(outputFilename);
+    std::cout << c++ << std::endl;
     TM.saveNormalMap("normalmap.png");
+    std::cout << c++ << std::endl;
     TM.saveDeltaDistMap("deltadistmap.png");
+    std::cout << c++ << std::endl;
 }
