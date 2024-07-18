@@ -47,6 +47,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 
 #include "CLI11.hpp"
 
@@ -265,8 +266,6 @@ struct TrunkMapper
     unsigned int myMapWidth;
     unsigned int myMapHeight;
 
-    std::vector<int> listoftries;
-
     // Constructors
     TrunkMapper(const PolyMesh& aTrunkMesh, std::vector<RealPoint>& points, unsigned int aWidth, unsigned int aHeight)
         : myDataMap(aHeight, std::vector< CellData >(aWidth)), myTrunkMesh(aTrunkMesh),
@@ -352,7 +351,6 @@ struct TrunkMapper
                 if(t > 0)
                 {   // intersection, we stop here
                     RealPoint n = faceNormal(bestCndtIterator->first);
-                    listoftries.emplace_back(c);
                     return CellData(bestCndtIterator->first, t, RealPoint(- n[2],
                                                      n[0] * aRay.myDirection[1] - n[1] * aRay.myDirection[0],
                                                      - n[0] * aRay.myDirection[0] - n[1] * aRay.myDirection[1]));
@@ -373,12 +371,10 @@ struct TrunkMapper
             }
             else
             {   // set is empty, no candidates, exiting the loop
-                std::cout << "No faces, exiting" << std::endl;
                 flag = false;
             }
         }
 
-        listoftries.emplace_back(c);
         // we only ever get here when the search fails
         // so we pay the high price of going through all of the mesh's faces
         std::pair<int, double> res = aRay.intersectSurface(myTrunkMesh);
@@ -392,6 +388,54 @@ struct TrunkMapper
         
         return CellData(res.first, res.second, RealPoint());
     }
+
+
+    CellData navigateMeshV2(int aFaceID, const Ray& aRay, bool memory = true)
+    {
+        // search for best (local) fitting vertex (best fit = highest cos with ray direction)
+        int bestVertID = myTrunkMesh.verticesAroundFace(aFaceID)[0];
+        double bestDot = aRay.myDirection.dot((myTrunkMesh.position(bestVertID) - aRay.myOrigin).getNormalized());
+
+        bool bestCandidateFound = false;
+        while(!bestCandidateFound)
+        {
+            PolyMesh::ArcRange arcsIndex = myTrunkMesh.outArcs(bestVertID);
+
+            bool foundBetter = false;
+            for(size_t i : arcsIndex)
+            {
+                double dot = aRay.myDirection.dot((myTrunkMesh.position(myTrunkMesh.head(i)) - aRay.myOrigin).getNormalized());
+                if(dot > bestDot)
+                {
+                    bestDot = dot;
+                    bestVertID = myTrunkMesh.head(i);
+                    foundBetter = true;
+                }
+            }
+
+            //std::cout << bestDot << std::endl;
+
+            bestCandidateFound = !foundBetter;  // stop the loop if we have not found better candidate
+        }
+
+        for(int faceID : myTrunkMesh.facesAroundVertex(bestVertID))
+        {
+            double t = intersectFace(faceID, aRay);
+
+            if(t > 0)
+            {   // return hit data
+                std::cout << "very good" << std::endl;
+                RealPoint n = faceNormal(faceID);
+                return CellData(faceID, t, RealPoint(- n[2],
+                                                     n[0] * aRay.myDirection[1] - n[1] * aRay.myDirection[0],
+                                                     - n[0] * aRay.myDirection[0] - n[1] * aRay.myDirection[1]));
+            }
+        }
+
+        // last resort
+        return navigateMesh(myTrunkMesh.facesAroundVertex(bestVertID)[0], aRay, false);
+    }
+
     
     void map()
     {
@@ -407,7 +451,7 @@ struct TrunkMapper
             {
                 if(previousFaceID != -1)
                 {
-                    myDataMap[i][j] = navigateMesh(previousFaceID, ray, false);
+                    myDataMap[i][j] = navigateMeshV2(previousFaceID, ray, false);
                 }
                 else
                 {
@@ -428,44 +472,26 @@ struct TrunkMapper
             // change previousFaceID to be the direct cell below rather than the last of last line
             previousFaceID = (myDataMap[i][0].myFaceID == -1 ? myDataMap[i][0].myFaceID : previousFaceID);
         }
-
-        // number of tries search
-        int n = 20;
-        auto minmax = std::minmax_element(listoftries.begin(), listoftries.end());
-        std::cout << *minmax.first << " " << *minmax.second << std::endl << std::endl;
-        std::vector<int> hist(20, 0);
-
-        for(int i : listoftries)
-        {
-            hist[(n-1) * (i - *minmax.first) / (*minmax.second - *minmax.first)]++;
-        }
-
-        for(int i = 0; i < hist.size(); i++)
-        {
-            std::cout << "[" << ((double)i)/n * (*minmax.second - *minmax.first) + *minmax.first << ", " 
-                             << ((double)i+1)/n * (*minmax.second - *minmax.first) + *minmax.first << "] : " << hist[i] << std::endl;
-        }
     }
 
 
-    void test(const RealPoint& p)
+    void test()
     {
-        Ray ray(RealPoint(), p);
-        std::pair<int, double> res = ray.intersectSurface(myTrunkMesh);
+        PolyMesh::ArcRange v_out = myTrunkMesh.outArcs(0);
 
-        if(res.first == -1)
+        auto v_in = myTrunkMesh.inArcs(0);
+
+        for(size_t e : v_out)
         {
-            return;
+            std::cout << myTrunkMesh.head(e) << "\t" << myTrunkMesh.tail(e) << std::endl;
         }
 
-        RealPoint n = faceNormal(res.first);
-        
-        CellData cd(res.first, res.second, RealPoint(- n[2],
-                                                     n[0] * ray.myDirection[1] - n[1] * ray.myDirection[0],
-                                                     - n[0] * ray.myDirection[0] - n[1] * ray.myDirection[1]));
-        
-        std::cout << "normal :" << n << std::endl;
-        std::cout << cd.myNormal << std::endl;
+        std::cout << std::endl;
+
+        for(auto e : v_in)
+        {
+            std::cout << myTrunkMesh.head(e) << "\t" << myTrunkMesh.tail(e) << std::endl;
+        }
     }
 
 
@@ -658,13 +684,21 @@ int main(int argc, char** argv)
     DGtal::trace.info() << " [done] (#points: " << centerline.size() << ")" <<  std::endl;
 
     TrunkMapper TM(inputPolySurf, centerline, nbHSamples, nbVSamples);
-    //TM.test(RealPoint(1, 0.0, 0.0).getNormalized());
-    TM.map();
+    //TM.test();
 
+    auto t0 = std::chrono::high_resolution_clock::now();
+    TM.map();
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    std::chrono::duration<double, std::milli> nbms = t1 - t0;
+
+    std::cout << "Mapping execution time : \t" << nbms.count() << std::endl;
+
+    /*
     TM.saveDistMap(outputFilename);
 
     TM.saveNormalMap("normalmap.png");
 
     TM.saveDeltaDistMap("deltadistmap.png");
-
+    */
 }
