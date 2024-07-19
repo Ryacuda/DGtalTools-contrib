@@ -307,7 +307,7 @@ struct TrunkMapper
         return aRay.intersectTriangle(p1, p2, p3);
     }
 
-    CellData navigateMesh(int aFaceID, const Ray& aRay, bool memory = true)
+    CellData faceSearch(int aFaceID, const Ray& aRay, bool memory = true)
     {
         // contains the ID of faces that have been tested for intersection
         std::set<int> visitedFaces;
@@ -390,7 +390,7 @@ struct TrunkMapper
     }
 
 
-    CellData navigateMeshV2(int aFaceID, const Ray& aRay, bool memory = true)
+    CellData navigateMesh(int aFaceID, const Ray& aRay, bool memory = true)
     {
         // search for best (local) fitting vertex (best fit = highest cos with ray direction)
         int bestVertID = myTrunkMesh.verticesAroundFace(aFaceID)[0];
@@ -413,8 +413,6 @@ struct TrunkMapper
                 }
             }
 
-            //std::cout << bestDot << std::endl;
-
             bestCandidateFound = !foundBetter;  // stop the loop if we have not found better candidate
         }
 
@@ -424,7 +422,6 @@ struct TrunkMapper
 
             if(t > 0)
             {   // return hit data
-                std::cout << "very good" << std::endl;
                 RealPoint n = faceNormal(faceID);
                 return CellData(faceID, t, RealPoint(- n[2],
                                                      n[0] * aRay.myDirection[1] - n[1] * aRay.myDirection[0],
@@ -433,7 +430,7 @@ struct TrunkMapper
         }
 
         // last resort
-        return navigateMesh(myTrunkMesh.facesAroundVertex(bestVertID)[0], aRay, false);
+        return faceSearch(myTrunkMesh.facesAroundVertex(bestVertID)[0], aRay, false);
     }
 
     
@@ -451,7 +448,7 @@ struct TrunkMapper
             {
                 if(previousFaceID != -1)
                 {
-                    myDataMap[i][j] = navigateMeshV2(previousFaceID, ray, false);
+                    myDataMap[i][j] = navigateMesh(previousFaceID, ray, false);
                 }
                 else
                 {
@@ -694,11 +691,11 @@ int main(int argc, char** argv)
 
     std::cout << "Mapping execution time : \t" << nbms.count() << std::endl;
 
-    /*
     TM.saveDistMap(outputFilename);
 
     TM.saveNormalMap("normalmap.png");
 
     TM.saveDeltaDistMap("deltadistmap.png");
-    */
+    
+    return 0;
 }
