@@ -515,12 +515,9 @@ struct TrunkMapper
 
         auto minmax = std::minmax_element(distMapImage.constRange().begin(), distMapImage.constRange().end());
 
-        DGtal::GradientColorMap<double> distcolormap(*minmax.first, *minmax.second);
-        distcolormap.addColor( DGtal::Color( 240, 10, 0 ) );        // red
-        distcolormap.addColor( DGtal::Color( 170, 40, 140 ) );      // purple
-	    distcolormap.addColor( DGtal::Color( 0,   10, 240 ) );      // blue
+        DGtal::GradientColorMap<double, DGtal::CMAP_JET> distcolormap(*minmax.first, *minmax.second);
 
-        DGtal::STBWriter< Image2D<double>, DGtal::GradientColorMap<double> >::exportPNG(distMapFilename, distMapImage, distcolormap);
+        DGtal::STBWriter< Image2D<double>, DGtal::GradientColorMap<double, DGtal::CMAP_JET> >::exportPNG(distMapFilename, distMapImage, distcolormap);
     }
 
 
@@ -616,12 +613,9 @@ struct TrunkMapper
 
         auto minmax = std::minmax_element(deltaDistMapImage.constRange().begin(), deltaDistMapImage.constRange().end());
 
-        DGtal::GradientColorMap<double> distcolormap(*minmax.first, *minmax.second);
-        distcolormap.addColor( DGtal::Color( 240, 10, 0 ) );        // red
-        distcolormap.addColor( DGtal::Color( 170, 40, 140 ) );      // purple
-	    distcolormap.addColor( DGtal::Color( 0,   10, 240 ) );      // blue
+        DGtal::GradientColorMap<double, DGtal::CMAP_JET> distcolormap(*minmax.first, *minmax.second);
 
-        DGtal::STBWriter< Image2D<double>, DGtal::GradientColorMap<double> >::exportPNG(deltaDistMapFilename, deltaDistMapImage, distcolormap);
+        DGtal::STBWriter< Image2D<double>, DGtal::GradientColorMap<double, DGtal::CMAP_JET> >::exportPNG(deltaDistMapFilename, deltaDistMapImage, distcolormap);
     }
 };
 
