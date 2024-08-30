@@ -490,14 +490,18 @@ struct TrunkMapper
     {
         Matrix3 rotMat(makeYawRotationMatrix(2 * M_PI / myMapWidth));
 
+        DGtal::trace.progressBar(0.0, myMapHeight);
+
         // loop over cells
         int previousFaceID = -1;        // holds the previous cell ID, -1 if it's not available
-        for(size_t i = 0; i < myTrunkCenter.mySampledPoints.size(); i++)
+        for(size_t i = 0; i < myMapHeight; i++)
         {
             Ray ray(myTrunkCenter.mySampledPoints[i], RealPoint(1.0, 0.0, 0.0));
 
             for(size_t j = 0; j < myMapWidth; j++)
             {
+                DGtal::trace.progressBar(i, myMapHeight);
+
                 if(previousFaceID != -1)
                 {
                     myDataMap[i][j] = navigateMesh(previousFaceID, ray, false);
