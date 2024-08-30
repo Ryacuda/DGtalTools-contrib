@@ -532,9 +532,12 @@ struct TrunkMapper
 
     void test()
     {
-        for(int s = 1; s < 10; s++)
+        for(int i = 0; i < myMapHeight; i++)
         {
-            std::cout << "Looping range for patch size" << s << " : [" << -(s-1)/2 << "," << (s)/2 << "], it will loop over " << ((s-1)/2) + (s/2) + 1 << "elements." << std::endl;
+            for(int j = 0; j < myMapWidth; j++)
+            {
+                std::cout << myDataMap[i][j].myNormal << std::endl;
+            }
         }
     }
 
@@ -580,9 +583,15 @@ struct TrunkMapper
                 double d = myDataMap[i][j].myDist;
                 if(std::isfinite(d))
                 {
-                    unsigned char r = (myDataMap[i][j].myNormal[0] + 1) * 127.5;
-                    unsigned char g = (myDataMap[i][j].myNormal[1] + 1) * 127.5;
-                    unsigned char b = 128 - myDataMap[i][j].myNormal[2] * 127;
+                    RealPoint n = myDataMap[i][j].myNormal;
+                    if(myDataMap[i][j].myNormal[2] >= 0)
+                    {   // correct inverted normals
+                        n *= -1;
+                    }
+
+                    unsigned char r = (n[0] + 1) * 127.5;
+                    unsigned char g = (n[1] + 1) * 127.5;
+                    unsigned char b = 128 - n[2] * 127;
 
                     /* if(b < 128)
                     {
@@ -727,7 +736,6 @@ int main(int argc, char** argv)
     DGtal::trace.info() << " [done] (#points: " << centerline.size() << ")" <<  std::endl;
 
     TrunkMapper TM(inputPolySurf, centerline, nbHSamples, nbVSamples);
-    //TM.test();
 
     auto t0 = std::chrono::high_resolution_clock::now();
     TM.map();
@@ -738,6 +746,7 @@ int main(int argc, char** argv)
 
     std::cout << std::endl << "Mapping execution time : \t" << nbms.count() << std::endl;
     
+    //TM.test();
     TM.saveDistMap(outputFilename);
     TM.saveNormalMap("normalmap.png");
     TM.saveDeltaDistMap("deltadistmap.png");
