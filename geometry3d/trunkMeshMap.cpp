@@ -69,7 +69,6 @@ using Image2D       = DGtal::ImageContainerBySTLVector<Domain, TValue>;
 
 const RealPoint::Component GLOBAL_epsilon = std::numeric_limits<RealPoint::Component>::epsilon();
 
-
 Matrix3 makeYawRotationMatrix(double aTheta)
 {
     double cosTheta = std::cos(aTheta);
@@ -433,6 +432,59 @@ struct TrunkMapper
         return faceSearch(myTrunkMesh.facesAroundVertex(bestVertID)[0], aRay, false);
     }
 
+
+    void fillMissingData()
+    {
+        // look up for holes in the data map and fill them
+        for(int i = 0; i < myMapHeight; i++)
+        {
+            for(int j = 0; j < myMapWidth; j++)
+            {
+                if(myDataMap[i][j].myFaceID == -1)
+                {   // missing face
+                    double dist_sum = 0;
+                    RealPoint normal_sum;
+                    unsigned short nb_neighbors = 0;
+
+                    for(int di = -1; di <= 1; di++)
+                    {
+                        int ni = i + di;
+                        if(ni < 0 || ni >= myMapHeight)
+                        {   // skip
+                            continue;
+                        }
+
+                        for(int dj = -1; dj <= 1; dj++)
+                        {
+                            int nj = j + dj;
+                            if(nj < 0)
+                            {   // wrap around case 1
+                                nj += myMapWidth;
+                            }
+                            else if(nj >= myMapWidth)
+                            {   // wrap around case 2
+                                nj -= myMapWidth;
+                            }
+
+                            // average of distance
+                            if(std::isfinite(myDataMap[ni][nj].myDist))
+                            {
+                                dist_sum += myDataMap[ni][nj].myDist;
+                                nb_neighbors++;
+                            }
+
+                            // average of normals
+                            normal_sum += myDataMap[ni][nj].myNormal;
+                        }
+                    }
+                    
+                    myDataMap[i][j].myDist = dist_sum/nb_neighbors;
+                    myDataMap[i][j].myNormal = normal_sum.getNormalized();
+                }
+            }
+        }
+    }
+
     
     void map()
     {
@@ -474,20 +526,9 @@ struct TrunkMapper
 
     void test()
     {
-        PolyMesh::ArcRange v_out = myTrunkMesh.outArcs(0);
-
-        auto v_in = myTrunkMesh.inArcs(0);
-
-        for(size_t e : v_out)
+        for(int s = 1; s < 10; s++)
         {
-            std::cout << myTrunkMesh.head(e) << "\t" << myTrunkMesh.tail(e) << std::endl;
-        }
-
-        std::cout << std::endl;
-
-        for(auto e : v_in)
-        {
-            std::cout << myTrunkMesh.head(e) << "\t" << myTrunkMesh.tail(e) << std::endl;
+            std::cout << "Looping range for patch size" << s << " : [" << -(s-1)/2 << "," << (s)/2 << "], it will loop over " << ((s-1)/2) + (s/2) + 1 << "elements." << std::endl;
         }
     }
 
@@ -504,7 +545,7 @@ struct TrunkMapper
                 double d = myDataMap[i][j].myDist;
                 if(std::isfinite(d))
                 {
-                    distMapImage.setValue(Point(j,i), myDataMap[i][j].myDist);
+                    distMapImage.setValue(Point(j,i), d);
                 }
                 else
                 {
@@ -556,10 +597,15 @@ struct TrunkMapper
         DGtal::STBWriter< Image2D<DGtal::Color> >::exportPNG(normalMapFilename, normalMapImage);
     }
 
-    void saveDeltaDistMap(const std::string& deltaDistMapFilename)
+    void saveDeltaDistMap(const std::string& deltaDistMapFilename, int patchHeight = 5, int patchWidth = 5)
     {
-        int patchWidth = 2;
-        int patchHeight = 2;
+        if(patchHeight > myMapHeight || patchWidth > myMapWidth || patchHeight <= 0 || patchWidth <= 0)
+        {   // patch bigger than the map or 0 or less
+            std::cout << "ERROR saveDeltaDistMap - Patch has a dimension larger than that of the map, or that is negative or zero :" << std::endl
+                << "Map size is " << myMapWidth << "x" << myMapHeight << " and patch size is " << patchWidth << "x" << patchHeight << "." << std::endl;
+            return;
+        }
+
         Domain dom(Point(0,0), Point(myMapWidth -1,myMapHeight -1));
         Image2D<double> deltaDistMapImage(dom);
 
@@ -577,7 +623,7 @@ struct TrunkMapper
                 // compute average distance
                 double sumDist = 0;
                 int count = 0;
-                for(int di = -patchHeight/2; di < patchHeight/2; di++)
+                for(int di = -(patchHeight-1)/2; di < patchHeight/2; di++)
                 {
                     int new_i = i + di;
                     if(new_i >= (int) myMapHeight || new_i < 0 )
@@ -585,11 +631,11 @@ struct TrunkMapper
                         continue;
                     }
 
-                    for(int dj = -patchWidth/2; dj < patchWidth/2; dj++)
+                    for(int dj = -(patchWidth-1)/2; dj < patchWidth/2; dj++)
                     {
                         int new_j = j + dj;
                         if(new_j >= (int) myMapWidth)
-                        {   // outside of image bound, but we adjust it
+                        {   // outside of image bound, but we wrap around
                             new_j -= myMapWidth;
                         }
                         else if(new_j < 0)
@@ -679,17 +725,16 @@ int main(int argc, char** argv)
 
     auto t0 = std::chrono::high_resolution_clock::now();
     TM.map();
+    TM.fillMissingData();
     auto t1 = std::chrono::high_resolution_clock::now();
 
     std::chrono::duration<double, std::milli> nbms = t1 - t0;
 
     std::cout << "Mapping execution time : \t" << nbms.count() << std::endl;
-
-    TM.saveDistMap(outputFilename);
-
-    TM.saveNormalMap("normalmap.png");
-
-    TM.saveDeltaDistMap("deltadistmap.png");
     
+    TM.saveDistMap(outputFilename);
+    TM.saveNormalMap("normalmap.png");
+    TM.saveDeltaDistMap("deltadistmap.png");
+
     return 0;
 }
