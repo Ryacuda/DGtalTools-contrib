@@ -30,3 +30,5 @@
 # Folders
 build/
 .vscode/
+debug/
+release/

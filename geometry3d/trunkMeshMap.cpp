@@ -492,18 +492,18 @@ struct TrunkMapper
     {
         Matrix3 rotMat(makeYawRotationMatrix(2 * M_PI / myMapWidth));
 
-        DGtal::trace.progressBar(0.0, myMapHeight);
+        DGtal::trace.progressBar(0, myMapHeight);
 
         // loop over cells
         FaceIndex previousFaceID = -1;        // holds the previous cell ID, -1 if it's not available
         for(size_t i = 0; i < myMapHeight; i++)
         {
+            DGtal::trace.progressBar(i, myMapHeight);
+
             Ray ray(myTrunkCenter.mySampledPoints[i], RealPoint(1.0, 0.0, 0.0));
 
             for(size_t j = 0; j < myMapWidth; j++)
             {
-                DGtal::trace.progressBar(i, myMapHeight);
-
                 if(previousFaceID != -1)
                 {
                     myDataMap[i][j] = navigateMesh(previousFaceID, ray, false);
@@ -686,8 +686,7 @@ int main(int argc, char** argv)
     std::string meshFilename;
     std::string centerlineFilename;
     std::string outputFilename = "map.png";
-    int nbVSamples = 200;
-    int nbHSamples = 200;
+    std::pair<int,int> map_size = {200,200};
 
     DGtal::Mesh<DGtal::Z3i::RealPoint> inputMesh;
     PolyMesh inputPolySurf;
@@ -703,8 +702,8 @@ int main(int argc, char** argv)
     app.add_option("--inputCenterline,2", centerlineFilename, "an points coordinates input file" )
         ->required()
         ->check(CLI::ExistingFile);
-    app.add_option("--nbVertSamples", nbVSamples, "number of vertical samples, also image height in pixels" );
-    app.add_option("--nbHoriSamples", nbHSamples, "number of vertical samples, also image height in pixels" );
+    app.add_option("-s, --mapSize", map_size, "map width and height (default 200x200)." )
+        ->check(CLI::PositiveNumber);
     
     // outputs
     app.add_option("-o,--output", outputFilename, "an output image file.", true );
@@ -735,7 +734,7 @@ int main(int argc, char** argv)
     std::vector<RealPoint> centerline = DGtal::PointListReader<RealPoint>::getPointsFromFile(centerlineFilename);
     DGtal::trace.info() << " [done] (#points: " << centerline.size() << ")" <<  std::endl;
 
-    TrunkMapper TM(inputPolySurf, centerline, nbHSamples, nbVSamples);
+    TrunkMapper TM(inputPolySurf, centerline, map_size.first, map_size.second);
 
     auto t0 = std::chrono::high_resolution_clock::now();
     TM.map();
