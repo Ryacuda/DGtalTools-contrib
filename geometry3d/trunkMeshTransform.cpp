@@ -100,61 +100,43 @@ using namespace DGtal;
 typedef DGtal::Mesh<DGtal::Z3i::RealPoint> Mesh3D;
 
 double
-gaussF(double x, double mu, double sigma)
-{
+gaussF(double x, double mu, double sigma){
     double max = exp((-(mu)*(mu))/(2.0*sigma*sigma))*(1.0/(sigma*sqrt(2*M_PI)));
     return (exp((-(x-mu)*(x-mu))/(2.0*sigma*sigma))*(1.0/(sigma*sqrt(2*M_PI))))/max;
 }
 
 
-struct PithSectionCenter
-{
+struct PithSectionCenter {
     std::vector<Z3i::RealPoint> myPith;
     std::vector<Z3i::RealPoint> mySampledPith;
     double myMinZ, myMaxZ;
     const double sampleSize = 20.0;
     int myNbIntervals;
-
-    // Constructors
-
-    PithSectionCenter(const std::vector<Z3i::RealPoint> &aPith): myPith(aPith)
-    {
+    PithSectionCenter(const std::vector<Z3i::RealPoint> &aPith): myPith(aPith){
         myMaxZ = (*std::max_element(aPith.begin(), aPith.end(),
                                     [](Z3i::RealPoint a, Z3i::RealPoint b){return a[2] < b[2];}))[2];
         myMinZ = (*std::min_element(aPith.begin(), aPith.end(),
                                     [](Z3i::RealPoint a, Z3i::RealPoint b){return a[2] < b[2];}))[2];
         myNbIntervals = (myMaxZ - myMinZ)/sampleSize;
-
-        for (unsigned int i = 0; i < myNbIntervals; i++)
-        {
+        for (unsigned int i = 0; i < myNbIntervals; i++){
             mySampledPith.push_back(Z3i::RealPoint(0,0,0));
         }
-
-        for (auto const &p: myPith)
-        {
+        for (auto const &p: myPith){
             int i = (int) floor((p[2]-myMinZ)/sampleSize);
             mySampledPith[i] = p;
         }
-
         //check if all sample are presents
         unsigned int n = 0;
-        for (unsigned int i = 0; i < myNbIntervals; i++)
-        {
+        for (unsigned int i = 0; i < myNbIntervals; i++){
             if (mySampledPith[i] != Z3i::RealPoint(0,0,0)){
                 n++;
             }
         }
-
-        if (n != mySampledPith.size())
-        {
-            DGtal::trace.warning() << "all samples are not represented: " << n << "over " << myNbIntervals << std::endl;
+        if (n != mySampledPith.size()){
+            trace.warning() << "all samples are not represented: " << n << "over " << myNbIntervals << std::endl;
         }
     }
-
-    // Methods
-
-    Z3i::RealPoint pithRepresentant(const Z3i::RealPoint &p) const 
-    {
+    Z3i::RealPoint pithRepresentant(const Z3i::RealPoint &p) const {
         unsigned int i = (unsigned int) ceil((p[2]-myMinZ)/sampleSize);
         assert(i >= 0);
         i = std::min((unsigned int)(mySampledPith.size()-1), i);
@@ -163,127 +145,61 @@ struct PithSectionCenter
 };
 
 
-struct TrunkAngularSamplor
-{
+struct TrunkAngularSamplor {
     double myDistanceScan;
     double myAngularVSize; // the vertical angular scan resolution
     Mesh3D myMesh;
     double myAngularToleranceFactor = 0.1; // the angle factor sensibility to consider a face is intersected by a laser bean. For instance a factor of 1 will consider all faces where face barycenters exactly intersect the laser bean while a value of 0.1 will a marge of myAngularVSize/10.
-    
-    // Constructor
-
     TrunkAngularSamplor(const Mesh3D &aMesh, const PithSectionCenter &pSectCenter,
                         double distanceScan, double angularTolFact=0.1,
-                        double angularVSize = 0.1, bool estimateScanVRes = true)
-    :   myDistanceScan(distanceScan), myMesh(aMesh), myAngularVSize(angularVSize)
-    {
-        if (estimateScanVRes)
-        {
-            double dz = pSectCenter.myPith[0][2] - pSectCenter.myPith[1][2];
+                        double angularVSize = 0.1, bool estimateScanVRes = true):
+                 myDistanceScan(distanceScan),
+                        myMesh(aMesh), myAngularVSize(angularVSize){
+        if (estimateScanVRes) {
+            double dz = pSectCenter.myPith[0][2]-pSectCenter.myPith[1][2];
             double l = sqrt(dz*dz+myDistanceScan*myDistanceScan);
             myAngularVSize = abs(asin(dz/l));
-            DGtal::trace.info() << "estimated vertical scan angle size: " << myAngularVSize << std::endl;
+            trace.info() << "estimated vertical scan angle size: " << myAngularVSize << std::endl;
         }
     }
-    
-    // Methods
-
-    bool isScanned(Mesh3D::Index aFaceId)
-    {
-        auto p = myMesh.getFaceBarycenter(aFaceId);
-        double l = sqrt( (p[2])*(p[2]) + myDistanceScan*myDistanceScan);
-        double a =   asin(p[2]/l);
-        double rS =  ceil(a / myAngularVSize)*myAngularVSize-a;
-        double rI =  a-floor(a / myAngularVSize)*myAngularVSize;
-        
+    bool isScanned(Mesh3D::Index aFaceId){
+            auto p = myMesh.getFaceBarycenter(aFaceId);
+            double l = sqrt( (p[2])*(p[2]) + myDistanceScan*myDistanceScan);
+            double a =   asin(p[2]/l);
+            double rS =  ceil(a / myAngularVSize)*myAngularVSize-a;
+            double rI =  a-floor(a / myAngularVSize)*myAngularVSize;
+            
         return abs(rI) < myAngularVSize*myAngularToleranceFactor ||
-               abs(rS) < myAngularVSize*myAngularToleranceFactor;
+               abs(rS) < myAngularVSize*myAngularToleranceFactor ;
     }
 };
 
-struct TrunkDeformator
-{
-    // Members
+struct TrunkDeformator {
     double mySectorSize;
     double myMinZ, myMaxZ;
-    double myMaxShift;
     int myNbSectors;
     std::vector<double> mySectorShift;
     const PithSectionCenter& mySectionCenter;
-
-    // Enum
-    enum DeformType
-    {
-        PITH_DEFORM, 
-        LINEAR_SHIFT, 
-        LONGI_ONDUL_SHIFT, 
-        RADIAL_ONDUL_SHIFT, 
-        LONGIRADIAL_ONDUL_SHIFT
-    };
     
-    // Constructor
-    TrunkDeformator(const PithSectionCenter &pSectCenter, double maxShift, double sectSize)
-        : mySectionCenter(pSectCenter), mySectorSize(sectSize), myMaxShift(maxShift)
-    {
+    TrunkDeformator(const PithSectionCenter &pSectCenter, double maxShift, double sectSize):
+                    mySectionCenter(pSectCenter),
+                    mySectorSize(sectSize){
         myNbSectors = (int)floor((2.0*M_PI) / mySectorSize);
         std::srand((unsigned int) std::time(NULL));
-
-        for (unsigned int i = 0; i < myNbSectors; i++)
-        {
-            double shift = rand()%((int)floor(2000.0*myMaxShift));
+        for (unsigned int i = 0; i < myNbSectors; i++){
+            double shift = rand()%((int)floor(2000.0*maxShift));
             shift /= 2000.0;
             mySectorShift.push_back(shift);
         }
     }
-
-    // Methods
-    Z3i::RealPoint deform(const Z3i::RealPoint &pt, Z3i::RealPoint ptCyl,
-                          DeformType defType = DeformType::LINEAR_SHIFT,
-                          double freqL = 1.0, double freqR = 1.0) const 
-    {
+    Z3i::RealPoint deform(const Z3i::RealPoint &pt, const Z3i::RealPoint &ptCyl) const {
         Z3i::RealPoint res = pt;
-        double ratioZ = (pt[2]-mySectionCenter.myMinZ)/(mySectionCenter.myMaxZ-mySectionCenter.myMinZ);
-
-        if (defType == RADIAL_ONDUL_SHIFT || defType == LONGIRADIAL_ONDUL_SHIFT) 
-        {
-            ptCyl[1] = ptCyl[1] + sin(ratioZ*freqR);
-        }
-
-        unsigned int sectInd = (unsigned int) floor(ptCyl[1]/mySectorSize)%myNbSectors;
+        unsigned int sectInd = (unsigned int) floor(ptCyl[1]/mySectorSize);
         double posA = (((double) sectInd)*mySectorSize+mySectorSize/2.0)-ptCyl[1];
         double gCoef = gaussF(posA, 0, mySectorSize/4.0 );
-        double hShift = 0.0;
-
-        switch (defType)
-        {
-            case DeformType::LINEAR_SHIFT:
-                hShift = mySectorShift[sectInd]*ratioZ*gCoef*0.5;
-                break;
-            case DeformType::LONGI_ONDUL_SHIFT :
-                hShift = cos(2.0*M_PI*freqL*ratioZ)*gCoef*myMaxShift;
-                break;
-            case DeformType::RADIAL_ONDUL_SHIFT:
-                hShift = mySectorShift[sectInd]*ratioZ*gCoef*0.5;
-                break;
-            case DeformType::LONGIRADIAL_ONDUL_SHIFT:
-                hShift = cos(2.0*M_PI*freqL*ratioZ)*gCoef*myMaxShift*ratioZ;
-                break;
-            default:
-                break;
-        }
-
-        // double hShift = mySectorShift[sectInd]*ratioZ*gCoef*0.5;
-
-        res = res  + (pt-mySectionCenter.pithRepresentant(pt)).getNormalized()*hShift;
-        return res;
-    }
-    
-    Z3i::RealPoint moveFromCenterLine(const Z3i::RealPoint &pt, Z3i::RealPoint ptCyl,
-                                      double fX, double fY, double fZ) const 
-    {
-        Z3i::RealPoint res = pt;
         double ratioZ = (pt[2]-mySectionCenter.myMinZ)/(mySectionCenter.myMaxZ-mySectionCenter.myMinZ);
-        res = res  + Z3i::RealPoint(cos(ratioZ*fX),cos(ratioZ*fY), cos(ratioZ*fZ))*myMaxShift;
+        double hShift = mySectorShift[sectInd]*ratioZ*gCoef*0.5;
+        res = res  + (pt-mySectionCenter.pithRepresentant(pt)).getNormalized()*hShift;
         return res;
     }
 };
@@ -311,19 +227,14 @@ int main( int argc, char** argv )
     double vSampleDist {5000.0};
     double vSampleAngularResol = 0.001;
     double vSampleAngularSensi = 0.1;
-    double lOndFreq = 1.0;
-    double rOndFreq = 1.0;
-
+    
     usage << "Usage: " << argv[0] << " [input]\n"
     << "Typical use example:\n \t trunkMeshTransform ../Samples/TrunkSample/chene1.off -c ../Samples/TrunkSample/chene1-cyl  "
     <<"-p ../Samples/TrunkSample/chene1_centerline.xyz  resTransform.off -s 200 1  --outputPoints resTransform.pts  "
     << "-F 0.8 -P 5.0 --mainDir 0 -1 0 \n";
-
     // parse command line using CLI-------------------------------------------------------
     CLI::App app;
-
     app.description("Transform an input mesh into points cloud simulating acquisition process like lidar Scan .\n" + usage.str() );
-
     app.add_option("--inputMesh,-i,1", inputMeshFileName, "Input file")
     ->required()->check(CLI::ExistingFile);
     app.add_option("--InputCCoords,-c,2", inputCLineFileName, "Input file containing cylinder coordinates")
@@ -337,19 +248,13 @@ int main( int argc, char** argv )
     ->expected(1);
     auto mainDirOpt = app.add_option("--mainDir,-m", mainDirV, "Define the main direction to define the filtering angle based (see --filterFacePosition and --filterFaceNormal ")
     ->expected(3);
-
     auto vertSampleOpt = app.add_flag("--verticalSampling", "Apply a vertical sampling simulation by considering the laser scan.");
     app.add_option("--scannerDistance", vSampleDist, "Define the laser scan position distance. (effect only with --verticalSampling) .", true);
+    
     auto vROpt = app.add_option("--vSampleAngularResol", vSampleAngularResol, "Define the vertical angular resolution of the laser scanner. (effect only with --verticalSampling) ");
     auto vSOpt = app.add_option("--vSampleAngularSensi", vSampleAngularSensi, "Defines the vertical angular sensibility laser scan intersection detection. (effect only with --verticalSampling) ");
-    
     auto outMesh = app.add_option("--outputMesh,-o,3", outputMesh, "Output mesh file name.");
     auto outPts = app.add_option("--outputPoints", outputPts, "Output pts file name");
-    
-    auto lOndOpt = app.add_option("--LongOndulation,-L", lOndFreq, "deforms the trunk by using a vertical ondulation along the bark instead  the shift sector (the ondulation frequence given as arguments is defined with respect to the trunk length). ");
-    auto rOndOpt = app.add_option("--RadOndulation,-R", rOndFreq, "deforms the trunk by using a radial ondulation along the bark instead  the shift sector (the ondulation frequence given as arguments is defined with respect to the trunk length). ");
-
-    
     app.get_formatter()->column_width(40);
     CLI11_PARSE(app, argc, argv);
     // END parse command line using CLI ----------------------------------------------
@@ -363,8 +268,8 @@ int main( int argc, char** argv )
     std::vector<DGtal::Z3i::RealPoint> pith;
     
     trace.info() << "Starting " << argv[0]  << "with input: "
-        <<  inputMeshFileName << " and output :" << outputBaseName
-        << " param: " << parameter <<std::endl;
+    <<  inputMeshFileName << " and output :" << outputBaseName
+    << " param: " << parameter <<std::endl;
     
     trace.info() << "Reading input mesh...";
     aMesh << inputMeshFileName;
@@ -384,79 +289,40 @@ int main( int argc, char** argv )
     mainDir[0] = mainDirV[0];
     mainDir[1] = mainDirV[1];
     mainDir[2] = mainDirV[2];
-    TrunkDeformator::DeformType defType = (lOndOpt->count() > 0) ? TrunkDeformator::DeformType::LONGI_ONDUL_SHIFT :
-                                          (rOndOpt -> count() > 0) ? TrunkDeformator::DeformType::RADIAL_ONDUL_SHIFT:
-                                            TrunkDeformator::DeformType::LINEAR_SHIFT;
     
-    if (rOndOpt -> count() > 0 && lOndOpt->count()>0)
-    {
-        defType = TrunkDeformator::DeformType::LONGIRADIAL_ONDUL_SHIFT;
-    }
-
     // prepare resulting mesh
-    for (auto it = aMesh.vertexBegin(); it != aMesh.vertexEnd(); it++)
-    {
+    for (auto it = aMesh.vertexBegin(); it != aMesh.vertexEnd(); it++){
         resultingMesh.addVertex(*it);
     }
 
-    defType = TrunkDeformator::DeformType::PITH_DEFORM;
-
     // First sector extraction
     mainDir = mainDir.getNormalized();
+
    
     //a) applying shift on sector
-    if (shiftFacePos->count()>0)
-    {
+    if (shiftFacePos->count()>0){
         ampliMaxShift = shiftFacePosParams.first;
         sectSize = shiftFacePosParams.second;
         TrunkDeformator tDef (pSct, ampliMaxShift, sectSize);
-
-        for (unsigned int i = 0; i < resultingMesh.nbVertex(); i++)
-        {
+        for (unsigned int i = 0; i < resultingMesh.nbVertex(); i++){
             Z3i::RealPoint &pt = resultingMesh.getVertex(i);
             Z3i::RealPoint ptCyl = cylCoordinates[i];
-            Z3i::RealPoint newP;
-
-            switch (defType)
-            {
-                case TrunkDeformator::DeformType::LINEAR_SHIFT:
-                    newP = tDef.deform(pt, ptCyl);
-                    break;
-                case TrunkDeformator::DeformType::LONGI_ONDUL_SHIFT:
-                    newP = tDef.deform(pt, ptCyl, TrunkDeformator::DeformType::LONGI_ONDUL_SHIFT,
-                                       lOndFreq, rOndFreq);
-                    break;
-                case TrunkDeformator::DeformType::RADIAL_ONDUL_SHIFT:
-                    newP = tDef.deform(pt, ptCyl, TrunkDeformator::DeformType::RADIAL_ONDUL_SHIFT,
-                                       lOndFreq, rOndFreq);
-                    break;
-                case TrunkDeformator::DeformType::LONGIRADIAL_ONDUL_SHIFT:
-                    newP = tDef.deform(pt, ptCyl, TrunkDeformator::DeformType::LONGIRADIAL_ONDUL_SHIFT,
-                                       lOndFreq, rOndFreq);
-                    break;
-                case TrunkDeformator::DeformType::PITH_DEFORM:
-                    newP = tDef.moveFromCenterLine(pt, ptCyl, 5, 10, 3);
-                default:
-                    break;
-            }
-
+            Z3i::RealPoint newP = tDef.deform(pt, ptCyl);
             pt[0] = newP[0]; pt[1] = newP[1]; pt[2] = newP[2];
         }
     }
     
     TrunkAngularSamplor tSamplor (aMesh, pSct, vSampleDist);
-    if (vROpt -> count()>0)
-    {
+    if (vROpt -> count()>0){
         tSamplor.myAngularVSize = vSampleAngularResol;
     }
-    if (vSOpt -> count()>0)
-    {
+    if (vSOpt -> count()>0){
         tSamplor.myAngularToleranceFactor = vSampleAngularSensi;
     }
 
     //b) filter faces from face normal vector and c) applying sampling simulation
-    for (unsigned int i = 0; i< aMesh.nbFaces(); i++)
-    {
+    for (unsigned int i = 0; i< aMesh.nbFaces(); i++){
+        
         DGtal::Mesh<Z3i::RealPoint>::MeshFace aFace = aMesh.getFace(i);
         bool okOrientation = true;
         bool okSampling = true;
@@ -466,16 +332,13 @@ int main( int argc, char** argv )
         Z3i::RealPoint p2 = aMesh.getVertex(aFace.at(2));
         okSampling = (vertSampleOpt-> count()>0) ? tSamplor.isScanned(i) : true;
 
-        if (filterFaceNormal -> count() > 0 && okSampling )
-        {
-            Z3i::RealPoint vectNormal = ((p1-p0).crossProduct(p2 - p0)).getNormalized();
+        if (filterFaceNormal -> count() > 0 && okSampling ){
+               Z3i::RealPoint vectNormal = ((p1-p0).crossProduct(p2 - p0)).getNormalized();
             vectNormal /= vectNormal.norm();
             okOrientation = vectNormal.dot(mainDir) > cos(normalAngleRange/2.0);
         }
-
         bool sectorCompatible = true;
-        if (filterFacePosition -> count() > 0 && okSampling)
-        {
+        if (filterFacePosition -> count() > 0 && okSampling){
             auto pB = (p0+p1+p2)/3.0;
             Z3i::RealPoint pC = pSct.pithRepresentant(pB);
             Z3i::RealPoint vectDir = pB - pC;
@@ -483,38 +346,33 @@ int main( int argc, char** argv )
             sectorCompatible = vectDir.dot(mainDir) > cos(posAngleRange/2.0);
         }
         
-        if( okOrientation && sectorCompatible && okSampling)
-        {
+        if( okOrientation && sectorCompatible && okSampling){
             resultingMesh.addFace(aFace);
         }
     }
+    
+   
+
     
     trace.info() << "Cleaning isolated vertices from " << resultingMesh.nbVertex();
     resultingMesh.removeIsolatedVertices();
     trace.info() << " to " << resultingMesh.nbVertex() << " [done]" << std::endl;
 
-    if (outMesh->count() > 0 )
-    {
+    if (outMesh->count() > 0 ){
         trace.info() << "Writing output mesh...";
         resultingMesh >> outputMesh;
         trace.info() << "[done]." << std::endl;
     }
-
-    if (outPts->count() > 0 )
-    {
+    if (outPts->count() > 0 ){
         trace.info() << "Writing output points...";
         
         ofstream fout;
         fout.open(outputPts);
-        
-        for (auto it = resultingMesh.vertexBegin(); it != resultingMesh.vertexEnd(); it++)
-        {
+        for (auto it = resultingMesh.vertexBegin(); it != resultingMesh.vertexEnd(); it++){
             fout << (*it)[0] << " " << (*it)[1] << " " << (*it)[2] << std::endl;
         }
-
         fout.close();
-        trace.info() << "[done]" << std::endl;
+        trace.info() << "[done]." << std::endl;
     }
-
     return 0;
 }

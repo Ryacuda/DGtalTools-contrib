@@ -13,6 +13,7 @@ SET(DGTAL_TOOLS_DEVEL_SRC
     graph2vol
     trunkMeshTransform
     trunkMeshMap
+    trunkSlice
 )
 
 
