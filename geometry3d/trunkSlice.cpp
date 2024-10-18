@@ -61,6 +61,11 @@ Options:
 
 */
 
+using Image2D = ImageContainerBySTLVector < Z2i::Domain, unsigned char >;
+using Image3D = ImageContainerBySTLVector < Z3i::Domain, unsigned char >;
+using PointR3 = Z3i::RealPoint;
+using PointZ3 = Z3i::Point;
+
 template< unsigned int SEP >
 void voxelizeAndExport(const std::string& inputFilename,
                        const std::string& outputFilename,
@@ -68,10 +73,6 @@ void voxelizeAndExport(const std::string& inputFilename,
                        const unsigned int margin,
                        const unsigned char fillVal)
 {
-    using Domain   = Z3i::Domain;
-    using PointR3  = Z3i::RealPoint;
-    using PointZ3  = Z3i::Point;
-
     trace.beginBlock("Preparing the mesh");
     trace.info() << "Reading input file: " << inputFilename;
     Mesh<PointR3> inputMesh;
@@ -100,7 +101,7 @@ void voxelizeAndExport(const std::string& inputFilename,
 
     trace.beginBlock("Voxelization");
     trace.info() << "Voxelization " << SEP << "-separated ; " << resolution << "^3 ";
-    Domain aDomain(bbox.first, bbox.second);
+    Z3i::Domain aDomain(bbox.first, bbox.second);
     trace.info()<< "Domain bounding box: "<< aDomain.lowerBound() <<" "<<  aDomain.upperBound() <<std::endl;
 
     //Digitization step
@@ -113,7 +114,7 @@ void voxelizeAndExport(const std::string& inputFilename,
     trace.beginBlock("Exporting");
     // Export the digital set to a vol file
     trace.info()<<aDomain<<std::endl;
-    ImageContainerBySTLVector<Domain, unsigned char> image(aDomain);
+    Image3D image(aDomain);
 
     for(auto p: mySet)
     {

@@ -63,7 +63,7 @@ using PolyMesh      = DGtal::PolygonalSurface<RealPoint>;
 using VertexRange   = PolyMesh::VertexRange;
 using Matrix3       = DGtal::SimpleMatrix<double, 3, 3>;
 using FaceIndex     = DGtal::PolygonalSurface<RealPoint>::FaceIndex;
-using VertexIndex     = DGtal::PolygonalSurface<RealPoint>::FaceIndex;
+using VertexIndex   = DGtal::PolygonalSurface<RealPoint>::FaceIndex;
 
 template<typename TValue>
 using Image2D       = DGtal::ImageContainerBySTLVector<Domain, TValue>;
