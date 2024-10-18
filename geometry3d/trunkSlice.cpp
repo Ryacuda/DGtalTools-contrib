@@ -66,8 +66,7 @@ using Image3D = ImageContainerBySTLVector < Z3i::Domain, unsigned char >;
 using PointR3 = Z3i::RealPoint;
 using PointZ3 = Z3i::Point;
 
-template< unsigned int SEP >
-void voxelizeAndExport(const std::string& inputFilename,
+Image3D voxelize(const std::string& inputFilename,
                        const std::string& outputFilename,
                        const unsigned int resolution,
                        const unsigned int margin,
@@ -100,13 +99,12 @@ void voxelizeAndExport(const std::string& inputFilename,
     trace.endBlock();
 
     trace.beginBlock("Voxelization");
-    trace.info() << "Voxelization " << SEP << "-separated ; " << resolution << "^3 ";
     Z3i::Domain aDomain(bbox.first, bbox.second);
     trace.info()<< "Domain bounding box: "<< aDomain.lowerBound() <<" "<<  aDomain.upperBound() <<std::endl;
 
     //Digitization step
     Z3i::DigitalSet mySet(aDomain);
-    MeshVoxelizer<Z3i::DigitalSet, SEP> aVoxelizer;
+    MeshVoxelizer<Z3i::DigitalSet, 6> aVoxelizer;
     aVoxelizer.voxelize(mySet, inputMesh, 1.0);
     trace.info() << " [done] " << std::endl;
     trace.endBlock();
@@ -123,6 +121,8 @@ void voxelizeAndExport(const std::string& inputFilename,
         
     image >> outputFilename.c_str();
     trace.endBlock();
+
+    return image;
 }
 
 int main( int argc, char** argv )
@@ -147,8 +147,6 @@ int main( int argc, char** argv )
     app.add_flag("-d,--objectDomainBB", unitScale, "use the digitization space defined from bounding box of input mesh. If seleted, the option --resolution will have no effect.");
     app.add_option("-f,--fillValue", fillValue, "change the default output  volumetric image value in [1...255].")
         ->expected(0, 255);
-    app.add_option("-s,--separation", separation, "voxelization 6-separated or 26-separated.", true)
-        -> check(CLI::IsMember({6, 26}));
     app.add_option("-r,--resolution", resolution,"digitization domain size (e.g. 128). The mesh will be scaled such that its bounding box maps to [0,resolution)^3.", true);
 
 
@@ -156,10 +154,8 @@ int main( int argc, char** argv )
     CLI11_PARSE(app, argc, argv);
     // END parse command line using CLI ----------------------------------------------    
 
-    if (separation==6)
-        voxelizeAndExport<6>(inputFileName, outputFileName, unitScale ? 0 : resolution, margin, fillValue);
-    else
-        voxelizeAndExport<26>(inputFileName, outputFileName, unitScale ? 0 : resolution, margin, fillValue);    
+    Image3D voxelized_mesh = voxelize(inputFileName, outputFileName, unitScale ? 0 : resolution, margin, fillValue);
+  
     return EXIT_SUCCESS;
 }
 
