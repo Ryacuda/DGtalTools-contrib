@@ -77,35 +77,31 @@ void voxelizeAndExport(const std::string& inputFilename,
     Mesh<PointR3> inputMesh;
     inputMesh << inputFilename.c_str();
     trace.info() << " [done]" << std::endl;
-    const std::pair<PointR3, PointR3> bbox = inputMesh.getBoundingBox();
+    std::pair<PointR3, PointR3> bbox = inputMesh.getBoundingBox();
     trace.info()<< "Mesh bounding box: "<<bbox.first <<" "<<bbox.second<<std::endl;
 
     const double smax = (bbox.second - bbox.first).max();
+    const double factor = resolution / smax;
+    const PointR3 translate = -bbox.first;
 
-    if (resolution != 0)
+    trace.info() << "Scale = "<<factor<<" translate = "<<translate<<std::endl;
+    
+    for(auto it = inputMesh.vertexBegin(), itend = inputMesh.vertexEnd(); it != itend; ++it)
     {
-        const double factor = resolution / smax;
-        const PointR3 translate = -bbox.first;
-        trace.info() << "Scale = "<<factor<<" translate = "<<translate<<std::endl;
-        
-        for(auto it = inputMesh.vertexBegin(), itend = inputMesh.vertexEnd(); it != itend; ++it)
-        {
-            //scale + translation
-            *it += translate;
-            *it *= factor;
-        }
-
-        trace.endBlock();
+        //scale + translation
+        *it += translate;
+        *it *= factor;
     }
+
+    //update BB
+    bbox = inputMesh.getBoundingBox();
+
+    trace.endBlock();
 
     trace.beginBlock("Voxelization");
     trace.info() << "Voxelization " << SEP << "-separated ; " << resolution << "^3 ";
-    Domain aDomain(PointZ3().diagonal(-margin), PointZ3().diagonal(resolution+margin));
-    
-    if (resolution == 0)
-    {
-        aDomain = Domain(bbox.first, bbox.second);
-    }
+    Domain aDomain(bbox.first, bbox.second);
+    trace.info()<< "Domain bounding box: "<< aDomain.lowerBound() <<" "<<  aDomain.upperBound() <<std::endl;
 
     //Digitization step
     Z3i::DigitalSet mySet(aDomain);
