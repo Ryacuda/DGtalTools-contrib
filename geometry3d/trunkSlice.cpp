@@ -14,6 +14,7 @@
 #include <iostream>
 #include <fstream>
 #include <chrono>
+
 #include "DGtal/helpers/StdDefs.h"
 #include "DGtal/shapes/MeshVoxelizer.h"
 #include "DGtal/kernel/sets/CDigitalSet.h"
@@ -22,6 +23,8 @@
 #include "DGtal/io/Display3D.h"
 #include "DGtal/io/writers/GenericWriter.h"
 #include "DGtal/images/ImageContainerBySTLVector.h"
+
+#include <boost/format.hpp>
 
 #include "CLI11.hpp"
 
@@ -65,28 +68,27 @@ using Image2D = ImageContainerBySTLVector < Z2i::Domain, unsigned char >;
 using Image3D = ImageContainerBySTLVector < Z3i::Domain, unsigned char >;
 using PointR3 = Z3i::RealPoint;
 using PointZ3 = Z3i::Point;
+using SliceImageAdapter = ConstImageAdapter<Image3D,
+                                            Image2D::Domain,
+                                            functors::Projector< Z3i::Space>,
+                                            Image3D::Value,
+                                            functors::Identity>;
 
-Image3D voxelize(const std::string& inputFilename,
-                       const std::string& outputFilename,
-                       const unsigned int resolution,
-                       const unsigned int margin,
-                       const unsigned char fillVal)
+Image3D voxelizeMesh(Mesh<PointR3>& input_mesh,
+                 const unsigned int number_of_slice,
+                 const unsigned char fillVal)
 {
-    trace.beginBlock("Preparing the mesh");
-    trace.info() << "Reading input file: " << inputFilename;
-    Mesh<PointR3> inputMesh;
-    inputMesh << inputFilename.c_str();
-    trace.info() << " [done]" << std::endl;
-    std::pair<PointR3, PointR3> bbox = inputMesh.getBoundingBox();
+    
+    std::pair<PointR3, PointR3> bbox = input_mesh.getBoundingBox();
     trace.info()<< "Mesh bounding box: "<<bbox.first <<" "<<bbox.second<<std::endl;
 
     const double smax = (bbox.second - bbox.first).max();
-    const double factor = resolution / smax;
+    const double factor = number_of_slice / smax;
     const PointR3 translate = -bbox.first;
 
     trace.info() << "Scale = "<<factor<<" translate = "<<translate<<std::endl;
     
-    for(auto it = inputMesh.vertexBegin(), itend = inputMesh.vertexEnd(); it != itend; ++it)
+    for(auto it = input_mesh.vertexBegin(), itend = input_mesh.vertexEnd(); it != itend; ++it)
     {
         //scale + translation
         *it += translate;
@@ -94,7 +96,7 @@ Image3D voxelize(const std::string& inputFilename,
     }
 
     //update BB
-    bbox = inputMesh.getBoundingBox();
+    bbox = input_mesh.getBoundingBox();
 
     trace.endBlock();
 
@@ -105,57 +107,97 @@ Image3D voxelize(const std::string& inputFilename,
     //Digitization step
     Z3i::DigitalSet mySet(aDomain);
     MeshVoxelizer<Z3i::DigitalSet, 6> aVoxelizer;
-    aVoxelizer.voxelize(mySet, inputMesh, 1.0);
-    trace.info() << " [done] " << std::endl;
+    aVoxelizer.voxelize(mySet, input_mesh, 1.0);
     trace.endBlock();
 
-    trace.beginBlock("Exporting");
     // Export the digital set to a vol file
-    trace.info()<<aDomain<<std::endl;
     Image3D image(aDomain);
 
     for(auto p: mySet)
     {
         image.setValue(p, fillVal);
     }
-        
-    image >> outputFilename.c_str();
-    trace.endBlock();
 
     return image;
+}
+
+void sliceVol(const Image3D vol, std::string output_basefilename, unsigned int slice_orientation)
+{
+    std::string output_fileext = output_basefilename.substr(output_basefilename.find_last_of(".")+1);
+
+    trace.beginBlock("Slicing");
+
+#pragma omp parallel for schedule(dynamic)
+    for(size_t i = 0; i < vol.domain().upperBound()[slice_orientation]; i++ )
+    {
+        trace.info() << "Exporting slice image "<< i ;
+
+        functors::Projector<Z2i::Space>  invFunctor; invFunctor.initRemoveOneDim(slice_orientation);
+        Z2i::Domain domain2D(invFunctor(vol.domain().lowerBound()),
+                             invFunctor(vol.domain().upperBound()));
+        
+        functors::Projector<Z3i::Space> aSliceFunctor(i); aSliceFunctor.initAddOneDim(slice_orientation);
+
+        const functors::Identity identityFunctor{};
+
+        SliceImageAdapter sliceImage( vol, domain2D, aSliceFunctor, identityFunctor);
+
+        std::stringstream output_filename;
+        output_filename << output_basefilename << "_" <<  boost::format("%|05|")% i <<"."<< output_fileext;
+
+        trace.info() << ": "<< output_filename.str() ;
+
+        GenericWriter<SliceImageAdapter>::exportFile(output_filename.str(), sliceImage);
+
+        trace.info() << " [done]"<< std::endl;
+    }
+
+    trace.endBlock();
 }
 
 int main( int argc, char** argv )
 { 
     // parse command line using CLI ----------------------------------------------
     CLI::App app;
-    std::string inputFileName;
-    std::string outputFileName {"result.vol"};
-    unsigned int margin  {0};
+    std::string input_filename;
+    std::string output_basefilename {"result.vol"};
+    std::pair<unsigned int, unsigned int> slice_size {192, 192};
     unsigned int separation {6};
-    unsigned int resolution {128};
-    unsigned char fillValue {128};
-    bool unitScale {false};
+    unsigned int number_of_slice {128};
+    unsigned char fill_value {128};
+    unsigned int slice_axis {2};
 
     app.description("Convert a mesh file into a 26-separated or 6-separated volumetric voxelization in a given resolution grid. \n Example:\n mesh2vol ${DGtal}/examples/samples/tref.off output.vol --separation 26 --resolution 256 ");
 
-    app.add_option("-i,--input,1", inputFileName, "mesh file (.off)." )
+    app.add_option("-i,--input,1", input_filename, "mesh file (.off)." )
         ->required()
         ->check(CLI::ExistingFile);
-    app.add_option("-o,--output,2", outputFileName, "filename of ouput volumetric file (vol, pgm3d, ...).",true);
-    app.add_option("-m,--margin", margin, "add volume margin around the mesh bounding box.");
-    app.add_flag("-d,--objectDomainBB", unitScale, "use the digitization space defined from bounding box of input mesh. If seleted, the option --resolution will have no effect.");
-    app.add_option("-f,--fillValue", fillValue, "change the default output  volumetric image value in [1...255].")
+    app.add_option("-o,--output,2", output_basefilename, "base_name.extension:  extracted 2D slice volumetric files (will result n files base_name_xxx.extension)",true);
+    
+    app.add_option("-f,--fillValue", fill_value, "change the default output  volumetric image value in [1...255].")
         ->expected(0, 255);
-    app.add_option("-r,--resolution", resolution,"digitization domain size (e.g. 128). The mesh will be scaled such that its bounding box maps to [0,resolution)^3.", true);
+    app.add_option("-s,--sliceSize", slice_size, "desired slice width and height (default 192x192).")
+        ->expected(2);
+    app.add_option("-a,--sliceAxis", slice_axis, "specify the slice orientation for which the slice are defined (by default =2 (Z direction))", true)
+        -> check(CLI::IsMember({0, 1, 2}));
+    app.add_option("-n,--nslice", number_of_slice,"digitization domain size (e.g. 128). The mesh will be scaled such that its bounding box largest dim is the number_of_slice", true);
 
 
     app.get_formatter()->column_width(40);
     CLI11_PARSE(app, argc, argv);
-    // END parse command line using CLI ----------------------------------------------    
+    // END parse command line using CLI ----------------------------------------------
 
-    Image3D voxelized_mesh = voxelize(inputFileName, outputFileName, unitScale ? 0 : resolution, margin, fillValue);
+    trace.beginBlock("Preparing the mesh");
+    trace.info() << "Reading input file: " << input_filename;
+    Mesh<PointR3> input_mesh;
+    input_mesh << input_filename;
+    trace.info() << " [done]" << std::endl;
+
+    Image3D voxelized_mesh = voxelizeMesh(input_mesh, number_of_slice, fill_value);
+
+    sliceVol(voxelized_mesh, output_basefilename, slice_axis);
+
+    //voxelized_mesh >> output_filename;
   
     return EXIT_SUCCESS;
 }
-
