@@ -24,12 +24,32 @@
 #include "DGtal/io/writers/GenericWriter.h"
 #include "DGtal/images/ImageContainerBySTLVector.h"
 
+#include <iostream>
+#include <fstream>
+#include <algorithm>
+#include <boost/algorithm/minmax_element.hpp>
+#include "DGtal/base/Common.h"
+#include "DGtal/helpers/StdDefs.h"
+#include "DGtal/base/BasicFunctors.h"
+#include "DGtal/kernel/BasicPointPredicates.h"
+#include "DGtal/kernel/sets/DigitalSetInserter.h"
+#include "DGtal/images/ImageContainerBySTLVector.h"
+#include "DGtal/images/ImageHelper.h"
+#include "DGtal/geometry/volumes/distance/DistanceTransformation.h"
+#include "DGtal/images/IntervalForegroundPredicate.h"
+#include "DGtal/io/boards/Board2D.h"
+#include "DGtal/io/writers/GenericWriter.h"
+#include "DGtal/io/readers/GenericReader.h"
+#include "DGtal/io/colormaps/HueShadeColorMap.h"
+#include "DGtal/io/colormaps/GrayscaleColorMap.h"
+#include "DGtal/base/BasicFunctors.h"
+#include "DGtal/io/colormaps/BasicColorToScalarFunctors.h"
+
 #include <boost/format.hpp>
 
 #include "CLI11.hpp"
 
 using namespace DGtal;
-
 
 /**
  @page mesh2vol
@@ -51,7 +71,7 @@ Options:
   -m,--margin UINT                      add volume margin around the mesh bounding box.
   -d,--objectDomainBB                   use the digitization space defined from bounding box of input mesh. If seleted, the option --resolution will have no effect.
   -s,--separation UINT:{6,26}=6         voxelization 6-separated or 26-separated.
-  -f,--fillValue                                        change the default output  volumetric image value in [1...255].
+  -f,--fillValue                        change the default output  volumetric image value in [1...255].
   -r,--resolution UINT=128              digitization domain size (e.g. 128). The mesh will be scaled such that its bounding box maps to [0,resolution)^3.
 @endcode
 
@@ -73,6 +93,38 @@ using SliceImageAdapter = ConstImageAdapter<Image3D,
                                             functors::Projector< Z3i::Space>,
                                             Image3D::Value,
                                             functors::Identity>;
+
+template<typename TContainer>
+void createDistanceMap(const TContainer& image, const std::string& filename_output, bool invert = true)
+{
+    Image2D img(image.domain());
+
+    size_t i = 0;
+    if(invert)
+    {
+        for(auto& value : img)
+        {
+            value = 255 - *(image.constRange().begin() + i);
+            i++;
+        }
+    }
+
+    typedef functors::IntervalForegroundPredicate<Image2D> Binarizer; 
+    Binarizer b(img,128, 255); 
+    typedef DGtal::DistanceTransformation<Z2i::Space, Binarizer, Z2i::L2Metric> DTL2;
+    DTL2 dt(&img.domain(),&b, &Z2i::l2Metric );
+
+    double maxDT = (*boost::first_max_element(dt.constRange().begin(), dt.constRange().end()));
+
+    i = 0;
+    for(auto& value : img)
+    {
+        value = *(dt.constRange().begin() + i);
+        i++;
+    }
+
+    DGtal::STBWriter<Image2D, DGtal::HueShadeColorMap<unsigned char,2> >::exportPNG(filename_output, img, DGtal::HueShadeColorMap<unsigned char,2>(0, maxDT));
+}
 
 Image3D voxelizeMesh(Mesh<PointR3>& input_mesh,
                  const unsigned int number_of_slice,
@@ -121,9 +173,10 @@ Image3D voxelizeMesh(Mesh<PointR3>& input_mesh,
     return image;
 }
 
-void sliceVol(const Image3D vol, std::string output_basefilename, unsigned int slice_orientation)
+void sliceVol(const Image3D vol, std::string output_filename, unsigned int slice_orientation)
 {
-    std::string output_fileext = output_basefilename.substr(output_basefilename.find_last_of(".")+1);
+    std::string output_fileext = output_filename.substr(output_filename.find_last_of(".")+1);
+    std::string output_basename = output_filename.substr(0, output_filename.find_last_of("."));
 
     trace.beginBlock("Slicing");
 
@@ -143,11 +196,15 @@ void sliceVol(const Image3D vol, std::string output_basefilename, unsigned int s
         SliceImageAdapter sliceImage( vol, domain2D, aSliceFunctor, identityFunctor);
 
         std::stringstream output_filename;
-        output_filename << output_basefilename << "_" <<  boost::format("%|05|")% i <<"."<< output_fileext;
+        std::stringstream dist_filename;
+        output_filename << output_basename << "_" <<  boost::format("%|05|")% i <<"."<< output_fileext;
+        dist_filename << output_basename << "_dist_" <<  boost::format("%|05|")% i <<".png";
 
         trace.info() << ": "<< output_filename.str() ;
 
         GenericWriter<SliceImageAdapter>::exportFile(output_filename.str(), sliceImage);
+
+        createDistanceMap<SliceImageAdapter>(sliceImage, dist_filename.str());
 
         trace.info() << " [done]"<< std::endl;
     }
@@ -164,7 +221,7 @@ int main( int argc, char** argv )
     std::pair<unsigned int, unsigned int> slice_size {192, 192};
     unsigned int separation {6};
     unsigned int number_of_slice {128};
-    unsigned char fill_value {128};
+    unsigned char fill_value {255};
     unsigned int slice_axis {2};
 
     app.description("Convert a mesh file into a 26-separated or 6-separated volumetric voxelization in a given resolution grid. \n Example:\n mesh2vol ${DGtal}/examples/samples/tref.off output.vol --separation 26 --resolution 256 ");
@@ -196,8 +253,6 @@ int main( int argc, char** argv )
     Image3D voxelized_mesh = voxelizeMesh(input_mesh, number_of_slice, fill_value);
 
     sliceVol(voxelized_mesh, output_basefilename, slice_axis);
-
-    //voxelized_mesh >> output_filename;
   
     return EXIT_SUCCESS;
 }
