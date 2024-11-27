@@ -14,6 +14,7 @@
 #include <iostream>
 #include <fstream>
 #include <chrono>
+#include <random>
 
 #include "DGtal/helpers/StdDefs.h"
 #include "DGtal/shapes/MeshVoxelizer.h"
@@ -130,7 +131,6 @@ Image3D voxelizeMesh(Mesh<PointR3>& input_mesh,
                  const unsigned int number_of_slice,
                  const unsigned char fillVal)
 {
-    
     std::pair<PointR3, PointR3> bbox = input_mesh.getBoundingBox();
     trace.info()<< "Mesh bounding box: "<<bbox.first <<" "<<bbox.second<<std::endl;
 
@@ -149,8 +149,6 @@ Image3D voxelizeMesh(Mesh<PointR3>& input_mesh,
 
     //update BB
     bbox = input_mesh.getBoundingBox();
-
-    trace.endBlock();
 
     trace.beginBlock("Voxelization");
     Z3i::Domain aDomain(bbox.first, bbox.second);
@@ -212,12 +210,114 @@ void sliceVol(const Image3D vol, std::string output_filename, unsigned int slice
     trace.endBlock();
 }
 
+class VariationSlicer
+{
+public:
+    // Constructors
+    VariationSlicer(const Mesh<PointR3>& baseMesh, const std::vector<PointR3>& pith, bool saveMeshes = false, size_t displacement_nb = 3)
+     : myBaseMesh(baseMesh), myPith(pith), saveMesh(saveMeshes)
+    {
+        if(pith.size() != 0)
+        {
+            myP1 = PointR3(0, 0, (*pith.begin())[2]);
+            myP4 = PointR3(0, 0, (*(pith.end()-1))[2]);
+            initBezierPoints(displacement_nb);
+        }
+    }
+
+    void generateSlices()
+    {
+        for(size_t i = 0; i < myP2.size(); i++)
+        {
+            Mesh<PointR3> mesh_copy = myBaseMesh;
+
+            for(auto it = mesh_copy.vertexBegin(), itend = mesh_copy.vertexEnd(); it != itend; ++it)
+            {
+                PointR3 t = getTranslation(*it, i);
+                t[2] = 0;   // don't change z coordinate
+                *it += t;
+            }
+
+            if(saveMesh)
+            {
+                mesh_copy >> "mesh_deform_" + std::to_string(i) + ".off";
+            }
+
+            Image3D voxelized_mesh = voxelizeMesh(mesh_copy, myNumberOfSlices, myFillValue);
+
+            sliceVol(voxelized_mesh, mySliceBaseFilename, myBaseSliceAxis);
+        }
+    }
+
+    // Methods
+    void initBezierPoints(size_t displacement_nb)
+    {
+        // generate two more points evenly spaced along z between p1 and p4
+        double dz = myP4[2] - myP1[2];
+
+        double amplitude = dz / 2;
+        std::random_device rd;  // Will be used to obtain a seed for the random number engine
+        std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
+        std::uniform_real_distribution<double> dis(-amplitude, amplitude);
+
+        // create P2 and P3 for each displacement
+        for(size_t i = 0; i < displacement_nb; i++)
+        {
+            myP2.emplace_back(dis(gen), dis(gen), myP1[2] + dz/3);        // p2
+            myP3.emplace_back(dis(gen), dis(gen), myP1[2] + 2 * dz/3);    // p3
+        }
+    }
+
+    void initSliceParameters(unsigned int numberOfSlices, unsigned char fillValue, std::string sliceBaseFilename, unsigned int baseSliceAxis)
+    {
+        myNumberOfSlices = numberOfSlices;
+        myFillValue = fillValue;
+        mySliceBaseFilename = sliceBaseFilename;
+        myBaseSliceAxis = baseSliceAxis;
+    }
+
+    PointR3 getTranslation(const PointR3& p, size_t dspt_index)
+    {
+        if(dspt_index >= myP2.size())
+        {
+            std::cout << "displacement index out of bound" << std::endl;
+            exit;
+        }
+
+        double t = (p[2] - myP1[2]) / (myP4[2] - myP1[2]);
+        double oneminust = 1 - t;
+        return myP1 * oneminust * oneminust * oneminust +
+               myP2[dspt_index] * oneminust * oneminust * t +
+               myP3[dspt_index] * oneminust * t * t +
+               myP4 * t * t * t;
+    }
+
+private:
+    // data we work on
+    Mesh<PointR3> myBaseMesh;
+    std::vector<PointR3> myPith;
+    bool saveMesh;
+
+    // deform parameters
+    PointR3 myP1;
+    std::vector<PointR3> myP2;
+    std::vector<PointR3> myP3;
+    PointR3 myP4;
+
+    // slice parameters
+    unsigned int myNumberOfSlices;
+    unsigned char myFillValue;
+    std::string mySliceBaseFilename;
+    unsigned int myBaseSliceAxis;
+};
+
 int main( int argc, char** argv )
 { 
     // parse command line using CLI ----------------------------------------------
     CLI::App app;
-    std::string input_filename;
-    std::string output_basefilename {"result.vol"};
+    std::string mesh_filename;
+    std::string centerline_filename;
+    std::string output_basefilename {"result.png"};
     std::pair<unsigned int, unsigned int> slice_size {192, 192};
     unsigned int separation {6};
     unsigned int number_of_slice {128};
@@ -226,10 +326,13 @@ int main( int argc, char** argv )
 
     app.description("Convert a mesh file into a 26-separated or 6-separated volumetric voxelization in a given resolution grid. \n Example:\n mesh2vol ${DGtal}/examples/samples/tref.off output.vol --separation 26 --resolution 256 ");
 
-    app.add_option("-i,--input,1", input_filename, "mesh file (.off)." )
+    app.add_option("-m,--mesh,1", mesh_filename, "mesh file (.off)." )
         ->required()
         ->check(CLI::ExistingFile);
-    app.add_option("-o,--output,2", output_basefilename, "base_name.extension:  extracted 2D slice volumetric files (will result n files base_name_xxx.extension)",true);
+    app.add_option("-c,--centerline,2", centerline_filename, "mesh file (.off)." )
+        ->required()
+        ->check(CLI::ExistingFile);
+    app.add_option("-o,--output,3", output_basefilename, "base_name.extension:  extracted 2D slice volumetric files (will result n files base_name_xxx.extension)",true);
     
     app.add_option("-f,--fillValue", fill_value, "change the default output  volumetric image value in [1...255].")
         ->expected(0, 255);
@@ -238,6 +341,8 @@ int main( int argc, char** argv )
     app.add_option("-a,--sliceAxis", slice_axis, "specify the slice orientation for which the slice are defined (by default =2 (Z direction))", true)
         -> check(CLI::IsMember({0, 1, 2}));
     app.add_option("-n,--nslice", number_of_slice,"digitization domain size (e.g. 128). The mesh will be scaled such that its bounding box largest dim is the number_of_slice", true);
+    auto save_meshes = app.add_flag("--saveMeshes", "saves the deformed meshes on the disk, disabled by default")
+        ->default_val(false);
 
 
     app.get_formatter()->column_width(40);
@@ -245,14 +350,21 @@ int main( int argc, char** argv )
     // END parse command line using CLI ----------------------------------------------
 
     trace.beginBlock("Preparing the mesh");
-    trace.info() << "Reading input file: " << input_filename;
+    trace.info() << "Reading mesh file: " << mesh_filename;
     Mesh<PointR3> input_mesh;
-    input_mesh << input_filename;
+    input_mesh << mesh_filename;
     trace.info() << " [done]" << std::endl;
 
-    Image3D voxelized_mesh = voxelizeMesh(input_mesh, number_of_slice, fill_value);
+    trace.info() << "Reading centerline file: " << centerline_filename;
+    std::vector<PointR3> pith;
+    pith = PointListReader<PointR3>::getPointsFromFile(centerline_filename);
+    trace.info() << " [done]" << std::endl;
+    trace.endBlock();
 
-    sliceVol(voxelized_mesh, output_basefilename, slice_axis);
-  
+    VariationSlicer vs(input_mesh, pith, save_meshes);
+    vs.initSliceParameters(number_of_slice, fill_value, output_basefilename, slice_axis);
+
+    vs.generateSlices();
+    
     return EXIT_SUCCESS;
 }
