@@ -1,10 +1,8 @@
 /**
  * @file trunkSlice.cpp
- * @ingroup converters
+ * @ingroup geometry3d
  *
- * @date 2018/01/11
- *
- *
+ * @date 2024/11/29
  *
  * This file is part of the DGtalTools.
  */
@@ -70,7 +68,6 @@ Options:
   -m,--mesh TEXT:FILE REQUIRED          mesh file (.off).
   -c,--centerline TEXT:FILE REQUIRED    centerline file.
   -o,--output TEXT                      base_name.extension:  extracted 2D slice volumetric files (will result n files base_name_##_#####.pgm)
-  -s,--sliceSize                        desired slice width and height (default 192x192).
   -a,--sliceAxis                        specify the slice orientation for which the slice are defined (by default =2 (Z direction))
   -n,--nslice                           number of slices.
   --saveMeshes                          saves the deformed meshes on the disk, disabled by default.
@@ -337,7 +334,6 @@ int main( int argc, char** argv )
     std::string mesh_filename;
     std::string centerline_filename;
     std::string output_basefilename {"result.png"};
-    std::pair<unsigned int, unsigned int> slice_size {192, 192};
     unsigned int separation {6};
     unsigned int number_of_slice {128};
     unsigned int slice_axis {2};
@@ -353,9 +349,6 @@ int main( int argc, char** argv )
         ->required()
         ->check(CLI::ExistingFile);
     app.add_option("-o,--output,3", output_basefilename, "base_name.extension:  extracted 2D slice volumetric files (will result n files base_name_##_#####.pgm)",true);
-
-    app.add_option("-s,--sliceSize", slice_size, "desired slice width and height (default 192x192).")
-        ->expected(2);
     app.add_option("-a,--sliceAxis", slice_axis, "specify the slice orientation for which the slice are defined (by default =2 (Z direction))", true)
         -> check(CLI::IsMember({0, 1, 2}));
     app.add_option("-n,--nslice", number_of_slice,"number of slices.", true);
