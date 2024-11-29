@@ -66,6 +66,7 @@ Options:
   -m,--mesh TEXT:FILE REQUIRED          mesh file (.off).
   -c,--centerline TEXT:FILE REQUIRED    centerline file.
   -o,--output TEXT                      base_name.extension:  extracted 2D slice volumetric files (will result n files base_name_##_#####.pgm)
+  -s,--sliceSize                        desired size of the slices (will add margin around the results.
   -a,--sliceAxis                        specify the slice orientation for which the slice are defined (by default =2 (Z direction))
   -n,--nslice                           number of slices.
   --saveMeshes                          saves the deformed meshes on the disk, disabled by default.
@@ -74,7 +75,7 @@ Options:
 
 @b Example:
 @code
-  $ trunkSlice Elm.off Elm_centerline.xyz path/s.pgm -n 40 --saveMeshes -v 4 0.2
+  $ trunkSlice Elm.off Elm_centerline.xyz path/s.pgm -n 40 --saveMeshes -v 4 0.2 -s 192 192
 
 @see trunkSlice.cpp
 
@@ -175,7 +176,7 @@ Image3D voxelizeMesh(Mesh<PointR3>& input_mesh, const unsigned int number_of_sli
  * Slices a 3D image along an axis.
  * The slices are written on the disk following the base filename parameter.
  */
-void sliceVol(const Image3D vol, std::string output_basename, unsigned int slice_orientation)
+void sliceVol(const Image3D vol, std::string output_basename, unsigned int slice_orientation, std::pair<size_t, size_t> slice_size)
 {
     trace.beginBlock("Slicing");
 
@@ -193,16 +194,42 @@ void sliceVol(const Image3D vol, std::string output_basename, unsigned int slice
 
         const functors::Identity identityFunctor{};
 
-        SliceImageAdapter sliceImage( vol, domain2D, aSliceFunctor, identityFunctor);
+        SliceImageAdapter sliceImageAdpt( vol, domain2D, aSliceFunctor, identityFunctor);
+
+        size_t img_size_x = sliceImageAdpt.domain().upperBound()[0];
+        size_t img_size_y = sliceImageAdpt.domain().upperBound()[1];
+
+        if(img_size_x > slice_size.first)
+        {
+            slice_size.first = img_size_x;
+        }
+
+        if(img_size_y > slice_size.second)
+        {
+            slice_size.second = img_size_y;
+        }
+
+        Image2D slice_img(Z2i::Domain(Z2i::Point(0, 0),Z2i::Point(slice_size.first, slice_size.second)));
+
+        size_t offset_x = (slice_size.first - img_size_x) / 2;
+        size_t offset_y = (slice_size.second - img_size_y) / 2;
+
+        for(size_t x = 0; x < img_size_x; x++)
+        {
+            for(size_t y = 0; y < img_size_y; y++)
+            {
+                slice_img.setValue(Z2i::Point(x + offset_x, y + offset_y), sliceImageAdpt.getPointer()->operator()(Z3i::Point(x,y,i)));
+            }
+        }
 
         std::string output_filename = output_basename + "_" + (boost::format("%|05|")% i).str() + ".pgm";
         std::string dist_filename = output_basename + "_dist_" + (boost::format("%|05|")% i).str() + ".png";
 
-        //trace.info() << ": "<< output_filename.str() ;
+        //trace.info() << ": "<< output_filename.str();
 
-        GenericWriter<SliceImageAdapter>::exportFile(output_filename, sliceImage);
+        GenericWriter<Image2D>::exportFile(output_filename, slice_img);
 
-        createDistanceMap<SliceImageAdapter>(sliceImage, dist_filename);
+        createDistanceMap<Image2D>(slice_img, dist_filename);
 
         //trace.info() << " [done]"<< std::endl;
     }
@@ -263,7 +290,7 @@ public:
             
             std::string base_slice_filename = myBaseOutputName + "_" + formatted_var_index;
 
-            sliceVol(voxelized_mesh, base_slice_filename, myBaseSliceAxis);
+            sliceVol(voxelized_mesh, base_slice_filename, myBaseSliceAxis, mySliceSize);
         }
     }
 
@@ -285,8 +312,9 @@ public:
         }
     }
 
-    void initSliceParameters(unsigned int numberOfSlices, unsigned int baseSliceAxis)
+    void initSliceParameters(unsigned int numberOfSlices, unsigned int baseSliceAxis, std::pair<size_t, size_t> sliceSize)
     {
+        mySliceSize = sliceSize;
         myNumberOfSlices = numberOfSlices;
         myBaseSliceAxis = baseSliceAxis;
     }
@@ -321,6 +349,7 @@ private:
     PointR3 myP4;
 
     // slice parameters
+    std::pair<size_t, size_t> mySliceSize;
     unsigned int myNumberOfSlices;
     unsigned int myBaseSliceAxis;
 };
@@ -332,13 +361,13 @@ int main( int argc, char** argv )
     std::string mesh_filename;
     std::string centerline_filename;
     std::string output_basefilename {"result.png"};
-    unsigned int separation {6};
+    std::pair<size_t, size_t> slice_size {192, 192};
     unsigned int number_of_slice {128};
     unsigned int slice_axis {2};
     std::pair<unsigned int, double> variations {3, 0.2};
     bool save_meshes = false;
 
-    app.description("Convert a mesh file into a 26-separated or 6-separated volumetric voxelization in a given resolution grid. \n Example:\n mesh2vol ${DGtal}/examples/samples/tref.off output.vol --separation 26 --resolution 256 ");
+    app.description("Deforms and slices a trunk mesh");
 
     app.add_option("-m,--mesh,1", mesh_filename, "mesh file (.off)." )
         ->required()
@@ -347,6 +376,7 @@ int main( int argc, char** argv )
         ->required()
         ->check(CLI::ExistingFile);
     app.add_option("-o,--output,3", output_basefilename, "base_name.extension:  extracted 2D slice volumetric files (will result n files base_name_##_#####.pgm)",true);
+    app.add_option("-s,--sliceSize", slice_size, "desired size of the slices (will add margin around the results)", true);
     app.add_option("-a,--sliceAxis", slice_axis, "specify the slice orientation for which the slice are defined (by default =2 (Z direction))", true)
         -> check(CLI::IsMember({0, 1, 2}));
     app.add_option("-n,--nslice", number_of_slice,"number of slices.", true);
@@ -373,7 +403,7 @@ int main( int argc, char** argv )
 
     // start slicing
     VariationSlicer vs(input_mesh, pith, output_basefilename, variations.first, variations.second, save_meshes);
-    vs.initSliceParameters(number_of_slice, slice_axis);
+    vs.initSliceParameters(number_of_slice, slice_axis, slice_size);
 
     vs.generateSlices();
     
