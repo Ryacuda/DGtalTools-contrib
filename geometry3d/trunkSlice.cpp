@@ -53,8 +53,6 @@ using namespace DGtal;
  @page trunkSlice
  @brief Deforms and slices a mesh.
 
-@b Usage: trunkSlice [input]
-
 @b Allowed @b options @b are:
 
 @code
@@ -76,7 +74,7 @@ Options:
 
 @b Example:
 @code
-  $ ./trunkSlice Elm.off Elm_centerline.xyz ~/Documents/test/slices/elm.pgm --saveMeshes -v 4 0.2
+  $ trunkSlice Elm.off Elm_centerline.xyz path/s.pgm -n 40 --saveMeshes -v 4 0.2
 
 @see trunkSlice.cpp
 

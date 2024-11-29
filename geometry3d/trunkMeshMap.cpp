@@ -15,7 +15,7 @@
  **/
 
 /**
- * @file
+ * @file trunkMeshMap.cpp
  * @ingroup geometry3d
  * @author 
  *
@@ -52,9 +52,31 @@
 #include "CLI11.hpp"
 
 /**
+ @page trunkMeshMap
+ @brief Tool to map the surface of a trunk mesh.
 
-doc :)
-**/
+@b Allowed @b options @b are:
+
+@code
+positionals:
+  1 TEXT:FILE REQUIRED                  mesh file (.off).
+  2 TEXT:FILE REQUIRED                  centerline file.
+
+Options:
+  -h,--help                             Print this help message and exit
+  -m,--mesh TEXT:FILE REQUIRED          mesh file (.off).
+  -c,--centerline TEXT:FILE REQUIRED    centerline file.
+  -o,--output TEXT                      File to save the map to.
+  -s,--mapSize                          ap width and height (default 200x200).
+@endcode
+
+@b Example:
+@code
+  $ trunkMeshMap Elm.off Elm_centerline.xyz -o path/map.png -s 100 400
+  
+@see trunkMeshMap.cpp
+
+*/
 
 using RealPoint     = DGtal::PointVector<3,double>;
 using Point         = DGtal::Z2i::Point;
@@ -71,6 +93,9 @@ using Image2D       = DGtal::ImageContainerBySTLVector<Domain, TValue>;
 const RealPoint::Component GLOBAL_epsilon = std::numeric_limits<RealPoint::Component>::epsilon();
 const FaceIndex GLOBAL_noFace = std::numeric_limits<FaceIndex>::max();
 
+/*
+ * Returns a rotation matrix with specified angle
+ */
 Matrix3 makeYawRotationMatrix(double aTheta)
 {
     double cosTheta = std::cos(aTheta);
@@ -80,7 +105,9 @@ Matrix3 makeYawRotationMatrix(double aTheta)
                     0,          0,          1};
 }
 
-
+/*
+ * Ray class to project along a direction and find intersections with geometry.
+ */
 struct Ray
 {
     // Members
@@ -170,7 +197,9 @@ struct Ray
     }
 };
 
-
+/*
+ * Class to sample a centerline and project mesh vertices onto
+ */
 struct SampledCenterline
 {
     // Members
@@ -237,7 +266,9 @@ struct SampledCenterline
     }
 };
 
-
+/*
+ * Main class that will compute and save maps from trunk meshes.
+ */
 struct TrunkMapper
 {
     // struct to hold the per cell data that we compute
@@ -529,19 +560,6 @@ struct TrunkMapper
         }
     }
 
-
-    void test()
-    {
-        for(int i = 0; i < myMapHeight; i++)
-        {
-            for(int j = 0; j < myMapWidth; j++)
-            {
-                std::cout << myDataMap[i][j].myNormal << std::endl;
-            }
-        }
-    }
-
-
     void saveDistMap(const std::string& distMapFilename)
     {
         Domain dom(Point(0,0), Point(myMapWidth -1,myMapHeight -1));
@@ -699,14 +717,14 @@ int main(int argc, char** argv)
     app.add_option("--inputMesh,1", meshFilename, "an input mesh file in .obj or .off format." )
         ->required()
         ->check(CLI::ExistingFile);
-    app.add_option("--inputCenterline,2", centerlineFilename, "an points coordinates input file" )
+    app.add_option("--inputCenterline,2", centerlineFilename, "a points coordinates input file" )
         ->required()
         ->check(CLI::ExistingFile);
     app.add_option("-s, --mapSize", map_size, "map width and height (default 200x200)." )
         ->check(CLI::PositiveNumber);
     
     // outputs
-    app.add_option("-o,--output", outputFilename, "an output image file.", true );
+    app.add_option("-o,--output", outputFilename, "File to save the map to.", true );
 
     app.get_formatter()->column_width(40);
     CLI11_PARSE(app, argc, argv);
